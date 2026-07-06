@@ -51,8 +51,9 @@ API_BASE=http://127.0.0.1:8124 MAIL_LOG=./deploy/api/app/maillog.txt node test/a
 - `server/router.php` — local `php -S` router only (harmless in production).
 - `scripts/build-deploy.mjs` — the `assemble` step.
 - `src/api.ts` — typed fetch client; holds the CSRF token; dispatches `AUTH_EXPIRED_EVENT` on 401.
-- `src/AuthGate.tsx` — decides login vs app vs reset screen; reads `?reset=<token>` from the URL.
-- `src/auth/` (Login, ResetPassword), `src/components/AccountModal.tsx` (change/set password), `src/pages/`, `shared/types.ts`.
+- `src/AppRoot.tsx` — client-side routing root (**react-router-dom**, `BrowserRouter` in `main.tsx`). Loads the session (`/auth/me`), guards routes, and maps URLs → pages: `/` = Dashboard, plus `/transactions` `/accounts` `/budgets` `/categories` (signed in); `/login` `/register` `/forgot-password` (signed out — a protected path while anon redirects to `/login?next=…`, honored after login). The emailed `/?reset=<token>` link (see `auth.php`) still short-circuits to the reset screen. Deep links work via the `.htaccess`/`router.php` SPA fallback.
+- `src/App.tsx` — the signed-in **layout shell**: sidebar `NavLink`s + `<Outlet context>`. Shared `month`/`categories`/`accounts` state lives here (survives page navigation) and pages read it via `useAppContext()`.
+- `src/auth/` — `Login` (one component; signin/register/forgot mode is driven by the route) and `ResetPassword`. `src/components/AccountModal.tsx` (change/set password), `src/pages/`, `shared/types.ts`.
 
 ### API endpoints (all under `/api`)
 ```

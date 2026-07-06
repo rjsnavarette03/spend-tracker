@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { NavLink, Outlet, useOutletContext } from 'react-router-dom';
 import type { Account, Category, User } from '../shared/types';
 import { api } from './api';
 import { AccountModal } from './components/AccountModal';
@@ -13,24 +14,31 @@ import {
   WalletIcon,
 } from './components/Icons';
 import { currentMonth } from './format';
-import { Accounts } from './pages/Accounts';
-import { Budgets } from './pages/Budgets';
-import { Categories } from './pages/Categories';
-import { Dashboard } from './pages/Dashboard';
-import { Transactions } from './pages/Transactions';
 
-type PageId = 'dashboard' | 'transactions' | 'accounts' | 'budgets' | 'categories';
+// Data shared across the app pages, provided by the layout's <Outlet> and read
+// by each page route via useAppContext(). Kept in the layout (which never
+// unmounts while navigating between pages) so month/categories/accounts persist.
+export interface AppContext {
+  month: string;
+  setMonth: (m: string) => void;
+  categories: Category[];
+  accounts: Account[];
+  onDataChanged: () => void;
+}
 
-const NAV: Array<{ id: PageId; label: string; icon: JSX.Element }> = [
-  { id: 'dashboard', label: 'Dashboard', icon: <DashboardIcon /> },
-  { id: 'transactions', label: 'Transactions', icon: <ListIcon /> },
-  { id: 'accounts', label: 'Accounts', icon: <BankIcon /> },
-  { id: 'budgets', label: 'Budgets', icon: <TargetIcon /> },
-  { id: 'categories', label: 'Categories', icon: <TagIcon /> },
+export function useAppContext(): AppContext {
+  return useOutletContext<AppContext>();
+}
+
+const NAV: Array<{ to: string; label: string; icon: JSX.Element }> = [
+  { to: '/', label: 'Dashboard', icon: <DashboardIcon /> },
+  { to: '/transactions', label: 'Transactions', icon: <ListIcon /> },
+  { to: '/accounts', label: 'Accounts', icon: <BankIcon /> },
+  { to: '/budgets', label: 'Budgets', icon: <TargetIcon /> },
+  { to: '/categories', label: 'Categories', icon: <TagIcon /> },
 ];
 
-export default function App({ user, onLogout }: { user: User; onLogout: () => void }) {
-  const [page, setPage] = useState<PageId>('dashboard');
+export default function AppLayout({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [month, setMonth] = useState(currentMonth());
   const [categories, setCategories] = useState<Category[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -75,6 +83,8 @@ export default function App({ user, onLogout }: { user: User; onLogout: () => vo
     void refreshAccounts();
   }, [refreshCategories, refreshAccounts]);
 
+  const ctx: AppContext = { month, setMonth, categories, accounts, onDataChanged };
+
   return (
     <div className="app">
       <aside className="sidebar">
@@ -86,14 +96,15 @@ export default function App({ user, onLogout }: { user: User; onLogout: () => vo
         </div>
         <nav className="nav">
           {NAV.map((item) => (
-            <button
-              key={item.id}
-              className={`nav-item ${page === item.id ? 'active' : ''}`}
-              onClick={() => setPage(item.id)}
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.to === '/'}
+              className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
             >
               {item.icon}
               <span className="nav-label">{item.label}</span>
-            </button>
+            </NavLink>
           ))}
         </nav>
         <div className="sidebar-foot">
@@ -109,29 +120,7 @@ export default function App({ user, onLogout }: { user: User; onLogout: () => vo
         </div>
       </aside>
       <main className="main">
-        {page === 'dashboard' && (
-          <Dashboard
-            month={month}
-            setMonth={setMonth}
-            categories={categories}
-            accounts={accounts}
-            onDataChanged={onDataChanged}
-          />
-        )}
-        {page === 'transactions' && (
-          <Transactions
-            month={month}
-            setMonth={setMonth}
-            categories={categories}
-            accounts={accounts}
-            onDataChanged={onDataChanged}
-          />
-        )}
-        {page === 'accounts' && <Accounts accounts={accounts} onDataChanged={onDataChanged} />}
-        {page === 'budgets' && <Budgets month={month} setMonth={setMonth} />}
-        {page === 'categories' && (
-          <Categories categories={categories} onDataChanged={onDataChanged} />
-        )}
+        <Outlet context={ctx} />
       </main>
 
       {showAccount && (

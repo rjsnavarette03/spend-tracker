@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import type { User } from '../../shared/types';
 import { api } from '../api';
 import { EyeIcon, EyeOffIcon, WalletIcon } from '../components/Icons';
@@ -20,14 +21,18 @@ declare global {
   }
 }
 
+// `mode` is driven by the route (/login, /register, /forgot-password); switching
+// between them navigates rather than flipping local state, so each is its own URL.
 export function Login({
+  mode,
   googleClientId,
   onAuthed,
 }: {
+  mode: 'signin' | 'register' | 'forgot';
   googleClientId: string;
   onAuthed: (user: User) => void;
 }) {
-  const [mode, setMode] = useState<'signin' | 'register' | 'forgot'>('signin');
+  const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
@@ -36,6 +41,12 @@ export function Login({
   const [busy, setBusy] = useState(false);
   const [forgotSent, setForgotSent] = useState(false);
   const googleDiv = useRef<HTMLDivElement>(null);
+
+  // Clear transient state whenever the route (mode) changes.
+  useEffect(() => {
+    setError('');
+    setForgotSent(false);
+  }, [mode]);
 
   // Keep latest callbacks in refs so the GIS effect runs exactly once.
   const onAuthedRef = useRef(onAuthed);
@@ -87,7 +98,7 @@ export function Login({
     return () => {
       cancelled = true;
     };
-  }, [googleClientId]);
+  }, [googleClientId, mode]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -130,12 +141,6 @@ export function Login({
     }
   };
 
-  const switchMode = (m: 'signin' | 'register' | 'forgot') => {
-    setMode(m);
-    setError('');
-    setForgotSent(false);
-  };
-
   return (
     <div className="login-wrap">
       <div className="login-card">
@@ -153,14 +158,14 @@ export function Login({
           <div className="login-tabs">
             <button
               className={mode === 'signin' ? 'active' : ''}
-              onClick={() => switchMode('signin')}
+              onClick={() => navigate('/login')}
               type="button"
             >
               Sign in
             </button>
             <button
               className={mode === 'register' ? 'active' : ''}
-              onClick={() => switchMode('register')}
+              onClick={() => navigate('/register')}
               type="button"
             >
               Create account
@@ -175,7 +180,7 @@ export function Login({
                 If an account exists for <strong>{email.trim()}</strong>, we've sent a password
                 reset link. Check your inbox (and spam folder) — the link expires in 1 hour.
               </div>
-              <button type="button" className="btn btn-block" onClick={() => switchMode('signin')}>
+              <button type="button" className="btn btn-block" onClick={() => navigate('/login')}>
                 Back to sign in
               </button>
             </div>
@@ -200,7 +205,7 @@ export function Login({
               <button type="submit" className="btn btn-primary btn-block" disabled={busy}>
                 {busy ? 'Sending…' : 'Send reset link'}
               </button>
-              <button type="button" className="link-btn" onClick={() => switchMode('signin')}>
+              <button type="button" className="link-btn" onClick={() => navigate('/login')}>
                 Back to sign in
               </button>
             </form>
@@ -241,7 +246,7 @@ export function Login({
                     <button
                       type="button"
                       className="link-btn"
-                      onClick={() => switchMode('forgot')}
+                      onClick={() => navigate('/forgot-password')}
                     >
                       Forgot password?
                     </button>
