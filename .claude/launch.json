@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "spendtracker-web",
+      "runtimeExecutable": "C:\\Users\\rjsna\\AppData\\Local\\Temp\\claude\\C--Users-rjsna-OneDrive-Documents-spend-tracker\\e8de7458-8d7e-4548-aafc-2e855325bb34\\scratchpad\\php\\php.exe",
+      "runtimeArgs": [
+        "-c",
+        "C:\\Users\\rjsna\\AppData\\Local\\Temp\\claude\\C--Users-rjsna-OneDrive-Documents-spend-tracker\\e8de7458-8d7e-4548-aafc-2e855325bb34\\scratchpad\\php\\php.ini",
+        "-S",
+        "127.0.0.1:8124",
+        "-t",
+        "web\\deploy",
+        "web\\deploy\\router.php"
+      ],
+      "port": 8124
+    }
+  ]
+}
