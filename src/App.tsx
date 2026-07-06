@@ -3,6 +3,7 @@ import { NavLink, Outlet, useOutletContext } from 'react-router-dom';
 import type { Account, Category, User } from '../shared/types';
 import { api } from './api';
 import { AccountModal } from './components/AccountModal';
+import { ThemeToggle } from './components/ThemeToggle';
 import {
   BankIcon,
   DashboardIcon,
@@ -110,6 +111,7 @@ export default function AppLayout({ user, onLogout }: { user: User; onLogout: ()
         <div className="sidebar-foot">
           <div className="user-line" title={account.email}>
             <span className="user-email">{account.name || account.email}</span>
+            <ThemeToggle />
             <button className="btn-icon" onClick={() => setShowAccount(true)} title="Account settings">
               <SettingsIcon />
             </button>

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import type { User } from '../../shared/types';
 import { api } from '../api';
 import { EyeIcon, EyeOffIcon, WalletIcon } from '../components/Icons';
+import { ThemeToggle } from '../components/ThemeToggle';
 import { cleanError } from '../format';
 
 declare global {
@@ -144,6 +145,7 @@ export function Login({
   return (
     <div className="login-wrap">
       <div className="login-card">
+        <ThemeToggle className="btn-icon login-theme-toggle" />
         <div className="login-logo">
           <span className="logo-badge logo-badge-lg">
             <WalletIcon size={22} />
