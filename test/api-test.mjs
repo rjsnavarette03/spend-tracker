@@ -361,6 +361,16 @@ let bankId = 0;
     date: `${MONTH}-11`, note: 'account income',
   });
 
+  // accountId filter (powers the account detail page): only this account's tx.
+  const bankTxs = await a.call('GET', `/transactions?accountId=${bankId}`);
+  check(
+    'accountId filter returns only that account',
+    bankTxs.status === 200 && bankTxs.data.length >= 2 && bankTxs.data.every((t) => t.accountId === bankId),
+    JSON.stringify(bankTxs.data.map((t) => t.accountId))
+  );
+  const walletTxs = await a.call('GET', `/transactions?accountId=${walletId}`);
+  check('accountId filter excludes other accounts', walletTxs.data.every((t) => t.accountId === walletId));
+
   let accounts = (await a.call('GET', '/accounts')).data;
   let bankRow = accounts.find((x) => x.id === bankId);
   check('balance = opening - expense + income', bankRow.balanceCents === 100000 - 20000 + 50000, `got ${bankRow.balanceCents}`);

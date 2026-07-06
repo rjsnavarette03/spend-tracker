@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import type { Account, AccountType, Transfer } from '../../shared/types';
 import { api } from '../api';
 import { confirm, toast } from '../components/feedback';
@@ -20,6 +21,7 @@ export function Accounts({
   accounts: Account[];
   onDataChanged: () => void;
 }) {
+  const navigate = useNavigate();
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [accountModal, setAccountModal] = useState<{ open: boolean; editing: Account | null }>({
     open: false,
@@ -174,7 +176,11 @@ export function Accounts({
                 <table className="table">
                   <tbody>
                     {items.map((a) => (
-                      <tr key={a.id}>
+                      <tr
+                        key={a.id}
+                        className="row-link"
+                        onClick={() => navigate(`/accounts/${a.id}`)}
+                      >
                         <td>
                           <span className="cat-chip">
                             {a.image ? (
@@ -193,14 +199,20 @@ export function Accounts({
                           <button
                             className="btn-icon"
                             title="Edit"
-                            onClick={() => setAccountModal({ open: true, editing: a })}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setAccountModal({ open: true, editing: a });
+                            }}
                           >
                             <PencilIcon />
                           </button>
                           <button
                             className="btn-icon danger"
                             title="Delete"
-                            onClick={() => removeAccount(a)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeAccount(a);
+                            }}
                           >
                             <TrashIcon />
                           </button>

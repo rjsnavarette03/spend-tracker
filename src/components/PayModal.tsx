@@ -1,0 +1,127 @@
+import { FormEvent, useState } from 'react';
+import type { Account } from '../../shared/types';
+import { api } from '../api';
+import { cleanError, fmtMoney, parseAmountToCents, todayStr } from '../format';
+import { Modal } from './Modal';
+import { MoneyInput } from './MoneyInput';
+
+// Pay the given account from another account. Implemented as a transfer
+// (source -> account), so the source balance is deducted and this account's
+// balance / owed amount updates automatically. Sources are debit or credit
+// accounts other than the one being paid.
+export function PayModal({
+  account,
+  accounts,
+  onClose,
+  onSaved,
+}: {
+  account: Account;
+  accounts: Account[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const sources = accounts.filter(
+    (a) => a.id !== account.id && (a.type === 'debit' || a.type === 'credit')
+  );
+
+  const [sourceId, setSourceId] = useState<string>(sources[0] ? String(sources[0].id) : '');
+  const [amount, setAmount] = useState('');
+  const [date, setDate] = useState(todayStr());
+  const [note, setNote] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setError('');
+    if (!sourceId) {
+      setError('Choose an account to pay from');
+      return;
+    }
+    const amountCents = parseAmountToCents(amount);
+    if (amountCents === null) {
+      setError('Enter a positive amount, e.g. 500.00');
+      return;
+    }
+    if (!date) {
+      setError('Pick a date');
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.transfers.create({
+        fromAccountId: Number(sourceId),
+        toAccountId: account.id,
+        amountCents,
+        feeCents: 0,
+        date,
+        note: note.trim() || `Payment to ${account.name}`,
+      });
+      onSaved();
+      onClose();
+    } catch (err) {
+      setError(cleanError(err));
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal title={`Pay ${account.name}`} onClose={onClose}>
+      <form className="form-grid" onSubmit={submit}>
+        <div className="field">
+          <label htmlFor="pay-source">Pay from</label>
+          <select
+            id="pay-source"
+            value={sourceId}
+            onChange={(e) => setSourceId(e.target.value)}
+            autoFocus
+          >
+            <option value="">Choose account…</option>
+            {sources.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name} ({fmtMoney(a.balanceCents)})
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="field">
+          <label htmlFor="pay-amount">Amount</label>
+          <MoneyInput id="pay-amount" value={amount} onChange={setAmount} />
+        </div>
+
+        <div className="field">
+          <label htmlFor="pay-date">Date</label>
+          <input id="pay-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        </div>
+
+        <div className="field">
+          <label htmlFor="pay-note">Note (optional)</label>
+          <input
+            id="pay-note"
+            type="text"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            maxLength={500}
+            placeholder={`Payment to ${account.name}`}
+          />
+        </div>
+
+        <div className="field-hint">
+          The amount is deducted from the source account and applied to {account.name}.
+        </div>
+
+        {error && <div className="form-error">{error}</div>}
+
+        <div className="form-actions">
+          <button type="button" className="btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="submit" className="btn btn-primary" disabled={saving}>
+            {saving ? 'Paying…' : 'Pay'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}

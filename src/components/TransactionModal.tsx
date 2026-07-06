@@ -10,6 +10,7 @@ export function TransactionModal({
   categories,
   accounts,
   defaultMonth,
+  defaultAccountId,
   onClose,
   onSaved,
 }: {
@@ -17,6 +18,7 @@ export function TransactionModal({
   categories: Category[];
   accounts: Account[];
   defaultMonth: string;
+  defaultAccountId?: number;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -29,7 +31,11 @@ export function TransactionModal({
     initial?.categoryId != null ? String(initial.categoryId) : ''
   );
   const [accountId, setAccountId] = useState<string>(
-    initial?.accountId != null ? String(initial.accountId) : ''
+    initial?.accountId != null
+      ? String(initial.accountId)
+      : defaultAccountId != null
+        ? String(defaultAccountId)
+        : ''
   );
   const [note, setNote] = useState(initial?.note ?? '');
   const [error, setError] = useState('');

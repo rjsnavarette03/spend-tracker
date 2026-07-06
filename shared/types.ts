@@ -89,6 +89,7 @@ export interface TxFilter {
   month?: string; // YYYY-MM
   type?: TxType | 'all';
   categoryId?: number | 'all';
+  accountId?: number | 'all';
   search?: string;
 }
 

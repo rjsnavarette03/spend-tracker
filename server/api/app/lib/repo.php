@@ -129,6 +129,10 @@ final class Repo
             $where[] = 't.category_id = ?';
             $params[] = Validate::intId($filter['categoryId']);
         }
+        if (isset($filter['accountId']) && $filter['accountId'] !== '' && $filter['accountId'] !== 'all') {
+            $where[] = 't.account_id = ?';
+            $params[] = Validate::intId($filter['accountId']);
+        }
         $search = trim((string)($filter['search'] ?? ''));
         if ($search !== '') {
             $like = '%' . strtolower(mb_substr($search, 0, 100)) . '%';

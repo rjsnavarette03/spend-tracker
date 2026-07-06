@@ -958,6 +958,58 @@ select {
   background: var(--surface-2);
 }
 
+/* Clickable table rows (e.g. accounts -> account detail). */
+.row-link {
+  cursor: pointer;
+}
+.row-link:hover {
+  background: var(--surface-2);
+}
+
+/* Account detail page */
+.back-link {
+  display: inline-block;
+  margin-bottom: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-decoration: none;
+}
+.back-link:hover {
+  color: var(--text);
+}
+
+.account-detail-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.account-detail-title .acct-avatar {
+  width: 28px;
+  height: 28px;
+}
+.account-detail-title .color-dot {
+  width: 14px;
+  height: 14px;
+}
+
+.account-balance-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.account-balance-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+}
+.account-balance-value {
+  font-size: 28px;
+  font-weight: 700;
+}
+
 /* color / image picker in the account modal */
 .image-picker {
   margin-top: 10px;

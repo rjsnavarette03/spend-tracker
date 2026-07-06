@@ -5,6 +5,7 @@ import { api, AUTH_EXPIRED_EVENT } from './api';
 import AppLayout, { useAppContext } from './App';
 import { Login } from './auth/Login';
 import { ResetPassword } from './auth/ResetPassword';
+import { AccountDetail } from './pages/AccountDetail';
 import { Accounts } from './pages/Accounts';
 import { Budgets } from './pages/Budgets';
 import { Categories } from './pages/Categories';
@@ -169,6 +170,7 @@ export function AppRoot() {
           <Route index element={<DashboardPage />} />
           <Route path="transactions" element={<TransactionsPage />} />
           <Route path="accounts" element={<AccountsPage />} />
+          <Route path="accounts/:id" element={<AccountDetail />} />
           <Route path="budgets" element={<BudgetsPage />} />
           <Route path="categories" element={<CategoriesPage />} />
         </Route>

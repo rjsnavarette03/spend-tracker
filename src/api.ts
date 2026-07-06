@@ -156,6 +156,7 @@ export const api: Api = {
           month: filter.month,
           type: filter.type === 'all' ? undefined : filter.type,
           categoryId: filter.categoryId === 'all' ? undefined : filter.categoryId,
+          accountId: filter.accountId === 'all' ? undefined : filter.accountId,
           search: filter.search,
         })}`
       ),
