@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Category, TxType } from '../../shared/types';
 import { api } from '../api';
+import { confirm, toast } from '../components/feedback';
 import { CategoryModal } from '../components/CategoryModal';
 import { PencilIcon, PlusIcon, TrashIcon } from '../components/Icons';
 import { cleanError } from '../format';
@@ -19,16 +20,22 @@ export function Categories({
   });
 
   const remove = async (c: Category) => {
-    const warning =
+    const message =
       c.txCount > 0
-        ? `Delete "${c.name}"?\n\n${c.txCount} transaction${c.txCount === 1 ? '' : 's'} will become Uncategorized. Any budgets for it will be removed.`
-        : `Delete "${c.name}"?`;
-    if (!window.confirm(warning)) return;
+        ? `${c.txCount} transaction${c.txCount === 1 ? '' : 's'} will become Uncategorized. Any budgets for it will be removed.`
+        : 'This category will be removed.';
+    const ok = await confirm({
+      title: `Delete "${c.name}"?`,
+      message,
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await api.categories.remove(c.id);
       onDataChanged();
     } catch (err) {
-      alert(cleanError(err));
+      toast.error(cleanError(err));
     }
   };
 

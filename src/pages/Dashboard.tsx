@@ -8,6 +8,7 @@ import type {
   Transaction,
 } from '../../shared/types';
 import { api } from '../api';
+import { toast } from '../components/feedback';
 import { DonutChart } from '../components/DonutChart';
 import { PlusIcon } from '../components/Icons';
 import { MonthPicker } from '../components/MonthPicker';
@@ -51,7 +52,7 @@ export function Dashboard({
       ]);
       setData({ summary, trend, breakdown, budgets, recent: txs.slice(0, 8) });
     } catch (err) {
-      alert(cleanError(err));
+      toast.error(cleanError(err));
     }
   }, [month]);
 

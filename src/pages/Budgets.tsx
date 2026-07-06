@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Budget } from '../../shared/types';
 import { api } from '../api';
+import { toast } from '../components/feedback';
 import { CopyIcon } from '../components/Icons';
 import { MoneyInput } from '../components/MoneyInput';
 import { MonthPicker } from '../components/MonthPicker';
@@ -26,7 +27,7 @@ export function Budgets({ month, setMonth }: { month: string; setMonth: (m: stri
       setDrafts({});
       setLoaded(true);
     } catch (err) {
-      alert(cleanError(err));
+      toast.error(cleanError(err));
     }
   }, [month]);
 
@@ -40,7 +41,7 @@ export function Budgets({ month, setMonth }: { month: string; setMonth: (m: stri
     const trimmed = draft.trim();
     const cents = trimmed === '' ? 0 : parseAmountToCents(trimmed);
     if (cents === null) {
-      alert('Enter a valid amount, or leave empty to remove the budget.');
+      toast.error('Enter a valid amount, or leave empty to remove the budget.');
       return;
     }
     if (cents === b.amountCents) {
@@ -55,7 +56,7 @@ export function Budgets({ month, setMonth }: { month: string; setMonth: (m: stri
       await api.budgets.upsert(b.categoryId, month, cents);
       await load();
     } catch (err) {
-      alert(cleanError(err));
+      toast.error(cleanError(err));
     }
   };
 
@@ -66,7 +67,7 @@ export function Budgets({ month, setMonth }: { month: string; setMonth: (m: stri
       setTimeout(() => setNotice(''), 4000);
       await load();
     } catch (err) {
-      alert(cleanError(err));
+      toast.error(cleanError(err));
     }
   };
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Account, Category, Transaction, TxType } from '../../shared/types';
 import { api } from '../api';
+import { confirm, toast } from '../components/feedback';
 import { DownloadIcon, PencilIcon, PlusIcon, TrashIcon } from '../components/Icons';
 import { MonthPicker } from '../components/MonthPicker';
 import { TransactionModal } from '../components/TransactionModal';
@@ -50,7 +51,7 @@ export function Transactions({
       );
       setLoaded(true);
     } catch (err) {
-      alert(cleanError(err));
+      toast.error(cleanError(err));
     }
   }, [month, typeFilter, catFilter, search]);
 
@@ -65,12 +66,18 @@ export function Transactions({
 
   const remove = async (t: Transaction) => {
     const label = `${fmtMoney(t.amountCents)} ${t.type} on ${dateLabel(t.date)}`;
-    if (!window.confirm(`Delete this transaction?\n\n${label}`)) return;
+    const ok = await confirm({
+      title: 'Delete transaction',
+      message: label,
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await api.transactions.remove(t.id);
       afterMutation();
     } catch (err) {
-      alert(cleanError(err));
+      toast.error(cleanError(err));
     }
   };
 

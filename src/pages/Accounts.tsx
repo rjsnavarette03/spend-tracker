@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Account, AccountType, Transfer } from '../../shared/types';
 import { api } from '../api';
+import { confirm, toast } from '../components/feedback';
 import { AccountEditModal } from '../components/AccountEditModal';
 import { PencilIcon, PlusIcon, TransferIcon, TrashIcon } from '../components/Icons';
 import { TransferModal } from '../components/TransferModal';
@@ -33,7 +34,7 @@ export function Accounts({
     try {
       setTransfers(await api.transfers.list());
     } catch (err) {
-      alert(cleanError(err));
+      toast.error(cleanError(err));
     }
   }, []);
 
@@ -51,26 +52,38 @@ export function Accounts({
     if (a.txCount > 0) usage.push(`${a.txCount} transaction${a.txCount === 1 ? '' : 's'}`);
     if (a.transferCount > 0)
       usage.push(`${a.transferCount} transfer${a.transferCount === 1 ? '' : 's'}`);
-    const warning =
+    const message =
       usage.length > 0
-        ? `Delete "${a.name}"?\n\n${usage.join(' and ')} will keep their history but lose the link to this account.`
-        : `Delete "${a.name}"?`;
-    if (!window.confirm(warning)) return;
+        ? `${usage.join(' and ')} will keep their history but lose the link to this account.`
+        : 'This account will be removed.';
+    const ok = await confirm({
+      title: `Delete "${a.name}"?`,
+      message,
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await api.accounts.remove(a.id);
       afterMutation();
     } catch (err) {
-      alert(cleanError(err));
+      toast.error(cleanError(err));
     }
   };
 
   const removeTransfer = async (t: Transfer) => {
-    if (!window.confirm(`Delete this transfer of ${fmtMoney(t.amountCents)}?`)) return;
+    const ok = await confirm({
+      title: 'Delete transfer',
+      message: `Delete this transfer of ${fmtMoney(t.amountCents)}?`,
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await api.transfers.remove(t.id);
       afterMutation();
     } catch (err) {
-      alert(cleanError(err));
+      toast.error(cleanError(err));
     }
   };
 
