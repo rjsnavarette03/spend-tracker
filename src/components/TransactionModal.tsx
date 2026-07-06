@@ -11,6 +11,7 @@ export function TransactionModal({
   accounts,
   defaultMonth,
   defaultAccountId,
+  lockType,
   onClose,
   onSaved,
 }: {
@@ -19,12 +20,15 @@ export function TransactionModal({
   accounts: Account[];
   defaultMonth: string;
   defaultAccountId?: number;
+  // When set, force this transaction type and hide the Expense/Income toggle
+  // (e.g. a purchase on a credit card is always an expense).
+  lockType?: TxType;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const defaultDate = defaultMonth === todayStr().slice(0, 7) ? todayStr() : `${defaultMonth}-01`;
 
-  const [type, setType] = useState<TxType>(initial?.type ?? 'expense');
+  const [type, setType] = useState<TxType>(initial?.type ?? lockType ?? 'expense');
   const [amount, setAmount] = useState(initial ? centsToInput(initial.amountCents) : '');
   const [date, setDate] = useState(initial?.date ?? defaultDate);
   const [categoryId, setCategoryId] = useState<string>(
@@ -111,22 +115,24 @@ export function TransactionModal({
   return (
     <Modal title={initial ? 'Edit transaction' : 'Add transaction'} onClose={onClose}>
       <form className="form-grid" onSubmit={submit}>
-        <div className="segmented" role="tablist">
-          <button
-            type="button"
-            className={type === 'expense' ? 'active-expense' : ''}
-            onClick={() => switchType('expense')}
-          >
-            Expense
-          </button>
-          <button
-            type="button"
-            className={type === 'income' ? 'active-income' : ''}
-            onClick={() => switchType('income')}
-          >
-            Income
-          </button>
-        </div>
+        {!lockType && (
+          <div className="segmented" role="tablist">
+            <button
+              type="button"
+              className={type === 'expense' ? 'active-expense' : ''}
+              onClick={() => switchType('expense')}
+            >
+              Expense
+            </button>
+            <button
+              type="button"
+              className={type === 'income' ? 'active-income' : ''}
+              onClick={() => switchType('income')}
+            >
+              Income
+            </button>
+          </div>
+        )}
 
         <div className="form-row">
           <div className="field">

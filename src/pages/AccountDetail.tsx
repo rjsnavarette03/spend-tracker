@@ -95,11 +95,17 @@ export function AccountDetail() {
           <button className="btn" onClick={() => setEditOpen(true)}>
             Edit
           </button>
-          {account.type === 'debit' ? (
-            <button className="btn btn-primary" onClick={() => setTxOpen(true)}>
+          {/* Debit & credit can add a transaction (credit = expense/purchase only,
+              wired below); loans are managed purely via Pay. */}
+          {account.type !== 'loan' && (
+            <button
+              className={account.type === 'debit' ? 'btn btn-primary' : 'btn'}
+              onClick={() => setTxOpen(true)}
+            >
               Add transaction
             </button>
-          ) : (
+          )}
+          {account.type !== 'debit' && (
             <button
               className="btn btn-primary"
               onClick={() => setPayOpen(true)}
@@ -225,6 +231,7 @@ export function AccountDetail() {
           accounts={accounts}
           defaultMonth={month}
           defaultAccountId={account.id}
+          lockType={account.type === 'credit' ? 'expense' : undefined}
           onClose={() => setTxOpen(false)}
           onSaved={afterMutation}
         />
