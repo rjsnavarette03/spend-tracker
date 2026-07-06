@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type {
+  Account,
   BreakdownRow,
   Budget,
   Category,
@@ -27,11 +28,13 @@ export function Dashboard({
   month,
   setMonth,
   categories,
+  accounts,
   onDataChanged,
 }: {
   month: string;
   setMonth: (m: string) => void;
   categories: Category[];
+  accounts: Account[];
   onDataChanged: () => void;
 }) {
   const [data, setData] = useState<DashboardData | null>(null);
@@ -200,6 +203,7 @@ export function Dashboard({
         <TransactionModal
           initial={null}
           categories={categories}
+          accounts={accounts}
           defaultMonth={month}
           onClose={() => setShowAdd(false)}
           onSaved={() => {

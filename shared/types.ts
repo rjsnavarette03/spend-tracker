@@ -1,6 +1,16 @@
-// Types shared between the Electron main process and the React renderer.
+// Types shared between the React frontend and (conceptually) the PHP API.
+// The PHP side mirrors these shapes exactly — keep them in sync.
 
 export type TxType = 'income' | 'expense';
+
+export interface User {
+  id: number;
+  email: string;
+  name: string;
+  hasPassword: boolean;
+  hasGoogle: boolean;
+  currency: string; // ISO 4217 code, e.g. 'USD', 'PHP'
+}
 
 export interface Category {
   id: number;
@@ -10,21 +20,63 @@ export interface Category {
   txCount: number;
 }
 
+export type AccountType = 'debit' | 'credit' | 'loan';
+
+// Balance semantics: positive = money you have, negative = money you owe.
+// balanceCents = opening + income tx − expense tx − (transfers out + fees) + transfers in.
+export interface Account {
+  id: number;
+  name: string;
+  type: AccountType;
+  color: string;
+  openingBalanceCents: number;
+  balanceCents: number;
+  txCount: number;
+  transferCount: number;
+}
+
+export interface Transfer {
+  id: number;
+  fromAccountId: number | null; // null after the account was deleted
+  toAccountId: number | null;
+  amountCents: number;
+  feeCents: number;
+  date: string; // YYYY-MM-DD
+  note: string;
+  fromName: string | null;
+  fromColor: string | null;
+  toName: string | null;
+  toColor: string | null;
+}
+
+export interface TransferInput {
+  fromAccountId: number;
+  toAccountId: number;
+  amountCents: number;
+  feeCents: number;
+  date: string; // YYYY-MM-DD
+  note: string;
+}
+
 export interface Transaction {
   id: number;
   amountCents: number;
   type: TxType;
   categoryId: number | null;
+  accountId: number | null;
   date: string; // YYYY-MM-DD
   note: string;
   categoryName: string | null;
   categoryColor: string | null;
+  accountName: string | null;
+  accountColor: string | null;
 }
 
 export interface TxInput {
   amountCents: number;
   type: TxType;
   categoryId: number | null;
+  accountId: number | null;
   date: string; // YYYY-MM-DD
   note: string;
 }
@@ -38,7 +90,7 @@ export interface TxFilter {
 
 // One row per expense category for a given month (budget may be unset = 0).
 export interface Budget {
-  id: number; // budget row id, 0 when no budget set for the month
+  id: number;
   categoryId: number;
   month: string; // YYYY-MM
   amountCents: number;
@@ -60,11 +112,53 @@ export interface BreakdownRow {
   totalCents: number;
 }
 
+export interface AuthResponse {
+  user: User;
+  csrf: string;
+}
+
+export interface MeResponse {
+  user: User | null;
+  csrf: string;
+  googleClientId: string;
+}
+
 export interface Api {
+  auth: {
+    me(): Promise<MeResponse>;
+    register(email: string, password: string, name: string): Promise<AuthResponse>;
+    login(email: string, password: string): Promise<AuthResponse>;
+    google(credential: string): Promise<AuthResponse>;
+    logout(): Promise<void>;
+    forgot(email: string): Promise<void>;
+    reset(token: string, password: string): Promise<AuthResponse>;
+    changePassword(currentPassword: string, newPassword: string): Promise<void>;
+    setCurrency(currency: string): Promise<string>;
+  };
   categories: {
     list(): Promise<Category[]>;
     create(data: { name: string; type: TxType; color: string }): Promise<Category>;
     update(id: number, data: { name: string; color: string }): Promise<void>;
+    remove(id: number): Promise<void>;
+  };
+  accounts: {
+    list(): Promise<Account[]>;
+    create(data: {
+      name: string;
+      type: AccountType;
+      color: string;
+      openingBalanceCents: number;
+    }): Promise<Account>;
+    update(
+      id: number,
+      data: { name: string; color: string; openingBalanceCents: number }
+    ): Promise<void>;
+    remove(id: number): Promise<void>;
+  };
+  transfers: {
+    list(month?: string): Promise<Transfer[]>;
+    create(data: TransferInput): Promise<Transfer>;
+    update(id: number, data: TransferInput): Promise<void>;
     remove(id: number): Promise<void>;
   };
   transactions: {
@@ -72,7 +166,6 @@ export interface Api {
     create(data: TxInput): Promise<Transaction>;
     update(id: number, data: TxInput): Promise<void>;
     remove(id: number): Promise<void>;
-    exportCsv(filter: TxFilter): Promise<{ saved: boolean; path?: string }>;
   };
   budgets: {
     list(month: string): Promise<Budget[]>;
@@ -83,9 +176,5 @@ export interface Api {
     summary(month: string): Promise<MonthlySummary>;
     trend(endMonth: string, count: number): Promise<MonthlySummary[]>;
     breakdown(month: string, type: TxType): Promise<BreakdownRow[]>;
-  };
-  app: {
-    version(): Promise<string>;
-    dbPath(): Promise<string>;
   };
 }

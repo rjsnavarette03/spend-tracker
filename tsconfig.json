@@ -11,8 +11,7 @@
     "isolatedModules": true,
     "esModuleInterop": true,
     "useDefineForClassFields": true,
-    "forceConsistentCasingInFileNames": true,
-    "noUnusedLocals": false
+    "forceConsistentCasingInFileNames": true
   },
   "include": ["src", "shared"]
 }

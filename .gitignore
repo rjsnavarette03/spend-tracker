@@ -1,6 +1,7 @@
 node_modules/
 dist/
-dist-electron/
-release/
-smoke-result.txt
+deploy/
+*.zip
+*.sqlite
+server/api/app/config.php
 *.log

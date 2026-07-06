@@ -10,8 +10,8 @@
         "-S",
         "127.0.0.1:8124",
         "-t",
-        "web\\deploy",
-        "web\\deploy\\router.php"
+        "deploy",
+        "deploy\\router.php"
       ],
       "port": 8124
     }

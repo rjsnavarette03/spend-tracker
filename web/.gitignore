@@ -1,7 +1,0 @@
-node_modules/
-dist/
-deploy/
-*.zip
-*.sqlite
-server/api/app/config.php
-*.log

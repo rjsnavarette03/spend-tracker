@@ -1,66 +1,23 @@
 {
-  "name": "spend-tracker",
-  "productName": "SpendTracker",
+  "name": "spend-tracker-web",
   "version": "1.0.0",
-  "description": "Personal budget, spending and income tracker",
-  "main": "dist-electron/main.js",
-  "author": "Quest Management Services",
-  "license": "MIT",
+  "description": "SpendTracker web app - React frontend + PHP/MySQL backend for shared hosting",
   "private": true,
+  "type": "module",
   "scripts": {
-    "dev": "node scripts/dev.mjs",
-    "typecheck": "tsc -p tsconfig.json && tsc -p electron/tsconfig.json",
-    "build:renderer": "vite build",
-    "build:main": "node scripts/build-main.mjs",
-    "build": "npm run typecheck && npm run build:renderer && npm run build:main",
-    "icon": "node scripts/make-icon.mjs",
-    "smoke": "node scripts/smoke.mjs",
-    "start": "electron .",
-    "dist": "npm run build && npm run icon && electron-builder --win --publish never"
+    "dev": "vite",
+    "typecheck": "tsc -p tsconfig.json",
+    "build": "npm run typecheck && vite build",
+    "assemble": "node scripts/build-deploy.mjs",
+    "test:api": "node test/api-test.mjs"
   },
   "devDependencies": {
-    "@types/node": "^22.10.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
-    "@types/sql.js": "^1.4.9",
     "@vitejs/plugin-react": "^4.3.4",
-    "electron": "^33.2.0",
-    "electron-builder": "^25.1.8",
-    "esbuild": "^0.24.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "sql.js": "^1.12.0",
     "typescript": "^5.7.2",
     "vite": "^5.4.11"
-  },
-  "build": {
-    "appId": "com.quest.spendtracker",
-    "productName": "SpendTracker",
-    "directories": {
-      "output": "release",
-      "buildResources": "buildResources"
-    },
-    "files": [
-      "dist/**",
-      "dist-electron/**",
-      "package.json"
-    ],
-    "asar": true,
-    "win": {
-      "target": [
-        { "target": "nsis" },
-        { "target": "portable" }
-      ],
-      "icon": "buildResources/icon.ico"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "artifactName": "${productName}-Setup-${version}.${ext}",
-      "shortcutName": "SpendTracker"
-    },
-    "portable": {
-      "artifactName": "${productName}-${version}-portable.${ext}"
-    }
   }
 }

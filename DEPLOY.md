@@ -55,12 +55,11 @@ I'll upload `deploy/`, create `api/app/config.php` with your DB creds, verify th
 
 ### 1. Build the site (on your PC)
 ```bash
-cd web
 npm install
 npm run build
 npm run assemble
 ```
-This creates `web/deploy/`.
+This creates `deploy/`.
 
 ### 2. Create the config file
 Copy `deploy/api/app/config.sample.php` to `deploy/api/app/config.php` and fill in your MySQL values from Prerequisite step 2:

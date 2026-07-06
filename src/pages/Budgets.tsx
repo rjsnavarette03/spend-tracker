@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { Budget } from '../../shared/types';
 import { api } from '../api';
 import { CopyIcon } from '../components/Icons';
+import { MoneyInput } from '../components/MoneyInput';
 import { MonthPicker } from '../components/MonthPicker';
 import { ProgressBar } from '../components/ProgressBar';
 import {
@@ -122,19 +123,16 @@ export function Budgets({ month, setMonth }: { month: string; setMonth: (m: stri
                       </span>
                     </td>
                     <td>
-                      <input
-                        className="budget-input"
-                        type="text"
-                        inputMode="decimal"
+                      <MoneyInput
+                        className="budget-money"
+                        ariaLabel={`Budget for ${b.categoryName}`}
                         placeholder="—"
                         value={drafts[b.categoryId] ?? centsToInput(b.amountCents)}
-                        onChange={(e) =>
-                          setDrafts((d) => ({ ...d, [b.categoryId]: e.target.value }))
+                        onChange={(clean) =>
+                          setDrafts((d) => ({ ...d, [b.categoryId]: clean }))
                         }
                         onBlur={() => void commit(b)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-                        }}
+                        onEnter={() => void commit(b)}
                       />
                     </td>
                     <td className="num">{fmtMoney(b.spentCents)}</td>

@@ -1,20 +1,30 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { Category, Transaction, TxFilter, TxType } from '../../shared/types';
+import type { Account, Category, Transaction, TxType } from '../../shared/types';
 import { api } from '../api';
 import { DownloadIcon, PencilIcon, PlusIcon, TrashIcon } from '../components/Icons';
 import { MonthPicker } from '../components/MonthPicker';
 import { TransactionModal } from '../components/TransactionModal';
-import { cleanError, dateLabel, fmtMoney, fmtSigned, monthLabel } from '../format';
+import {
+  cleanError,
+  dateLabel,
+  downloadFile,
+  fmtMoney,
+  fmtSigned,
+  monthLabel,
+  transactionsToCsv,
+} from '../format';
 
 export function Transactions({
   month,
   setMonth,
   categories,
+  accounts,
   onDataChanged,
 }: {
   month: string;
   setMonth: (m: string) => void;
   categories: Category[];
+  accounts: Account[];
   onDataChanged: () => void;
 }) {
   const [txs, setTxs] = useState<Transaction[]>([]);
@@ -27,13 +37,6 @@ export function Transactions({
     editing: null,
   });
   const [notice, setNotice] = useState('');
-
-  const filter: TxFilter = {
-    month,
-    type: typeFilter,
-    categoryId: catFilter === 'all' ? 'all' : Number(catFilter),
-    search,
-  };
 
   const load = useCallback(async () => {
     try {
@@ -71,16 +74,10 @@ export function Transactions({
     }
   };
 
-  const exportCsv = async () => {
-    try {
-      const result = await api.transactions.exportCsv(filter);
-      if (result.saved && result.path) {
-        setNotice(`Exported to ${result.path}`);
-        setTimeout(() => setNotice(''), 5000);
-      }
-    } catch (err) {
-      alert(cleanError(err));
-    }
+  const exportCsv = () => {
+    downloadFile(`transactions-${month}.csv`, transactionsToCsv(txs), 'text/csv;charset=utf-8');
+    setNotice(`Exported ${txs.length} ${txs.length === 1 ? 'entry' : 'entries'}`);
+    setTimeout(() => setNotice(''), 4000);
   };
 
   const incomeTotal = txs.filter((t) => t.type === 'income').reduce((s, t) => s + t.amountCents, 0);
@@ -147,7 +144,7 @@ export function Transactions({
           </button>
         </div>
       ) : (
-        <div className="panel" style={{ padding: '6px 8px' }}>
+        <div className="panel table-panel">
           <table className="table">
             <thead>
               <tr>
@@ -163,12 +160,23 @@ export function Transactions({
                 <tr key={t.id}>
                   <td style={{ whiteSpace: 'nowrap' }}>{dateLabel(t.date)}</td>
                   <td>
-                    <span className="cat-chip">
-                      <span
-                        className="color-dot"
-                        style={{ background: t.categoryColor ?? '#64748b' }}
-                      />
-                      <span>{t.categoryName ?? 'Uncategorized'}</span>
+                    <span className="chip-stack">
+                      <span className="cat-chip">
+                        <span
+                          className="color-dot"
+                          style={{ background: t.categoryColor ?? '#64748b' }}
+                        />
+                        <span>{t.categoryName ?? 'Uncategorized'}</span>
+                      </span>
+                      {t.accountName && (
+                        <span className="cat-chip account-chip" title={`Account: ${t.accountName}`}>
+                          <span
+                            className="color-dot"
+                            style={{ background: t.accountColor ?? '#64748b' }}
+                          />
+                          <span>{t.accountName}</span>
+                        </span>
+                      )}
                     </span>
                   </td>
                   <td className="note-cell">{t.note}</td>
@@ -207,6 +215,7 @@ export function Transactions({
         <TransactionModal
           initial={modal.editing}
           categories={categories}
+          accounts={accounts}
           defaultMonth={month}
           onClose={() => setModal({ open: false, editing: null })}
           onSaved={afterMutation}

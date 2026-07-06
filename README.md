@@ -1,89 +1,70 @@
 # SpendTracker
 
-A personal budget, spending and income tracker. This repo contains **two apps** that share the same UI and data model:
+SpendTracker — a personal budget, spending and income tracker with multi-user accounts. Sign in with **email + password** or **Google**; each account's data is private and stored in the server's database.
 
-- **Desktop** (this folder) — an offline Electron app; all data stays on your machine in a local SQLite database. No account, no server, no telemetry.
-- **Web** ([`web/`](web/)) — a multi-user web app (React + PHP/MySQL) with email/password and Google sign-in, built for Hostinger shared hosting. **Live at [budgettracker.rjsnavarette.com](https://budgettracker.rjsnavarette.com).**
+Built to run on **Hostinger shared hosting** (hPanel) with no build tools required on the server.
 
-![Stack](https://img.shields.io/badge/desktop-Electron%20%2B%20React%20%2B%20TS%20%2B%20SQLite-34d399)
-![Stack](https://img.shields.io/badge/web-React%20%2B%20PHP%20%2B%20MySQL-6366f1)
+- **Frontend**: React 18 + TypeScript, bundled by Vite into static files.
+- **Backend**: PHP 8 (no framework, no Composer) exposing a small JSON API under `/api`.
+- **Database**: MySQL / MariaDB in production (SQLite supported for local dev). Schema auto-creates on first request.
+- **Auth**: server-side sessions (HttpOnly cookie) + CSRF tokens; passwords hashed with `password_hash`; Google ID tokens verified server-side.
 
-Both apps store **money as integer cents** end to end, use `YYYY-MM-DD` / `YYYY-MM` date strings, and share the same four screens (Dashboard, Transactions, Budgets, Categories).
+## What ships to the server
 
-> Working in this repo with Claude Code or another agent? Start with **[CLAUDE.md](CLAUDE.md)** — it maps both apps, their commands, and the non-obvious gotchas.
-
-## Repository layout
+`npm run build && npm run assemble` produces `deploy/`, which is the entire site to upload:
 
 ```
-.                     ← desktop app (Electron + React)
-├─ electron/          main process + sql.js data layer + typed IPC
-├─ src/               React renderer (shared UI)
-├─ shared/types.ts    main↔renderer contract
-├─ scripts/           dev / build / icon / smoke tooling
-└─ web/               ← web app (self-contained)
-   ├─ src/            React SPA (ported from the desktop UI) + auth screens
-   ├─ server/         PHP 8 JSON API + MySQL/SQLite schema
-   ├─ test/           end-to-end API test suite
-   ├─ README.md       web dev guide
-   └─ DEPLOY.md       step-by-step Hostinger deployment
+deploy/
+  index.html, assets/, icon.png        ← built React app
+  .htaccess                            ← SPA routing + API rewrite + security headers
+  router.php                           ← local `php -S` testing only (harmless on server)
+  api/
+    index.php                          ← API front controller (the only public PHP)
+    app/
+      .htaccess                        ← denies web access to everything in app/
+      config.php                       ← YOU create this (DB creds + Google ID); not in git
+      config.sample.php                ← template to copy
+      lib/*.php                        ← http, db, validate, auth, repo
+      schema.mysql.sql, schema.sqlite.sql
 ```
 
-The two apps have separate `package.json` files and separate builds. The rest of this README covers the **desktop** app; see [web/README.md](web/README.md) for the web app.
+See **DEPLOY.md** for the full step-by-step Hostinger deployment guide.
 
-## Features
-
-- **Dashboard** — monthly income / expenses / net, savings rate, budget usage, 6-month income-vs-expense trend chart, spending-by-category donut, budget snapshot, recent transactions.
-- **Transactions** — add / edit / delete income and expenses, filter by month, type, category and free-text search, per-filter totals, CSV export (Excel-friendly).
-- **Budgets** — set a monthly limit per expense category, inline editing, spent / remaining / progress with over-budget highlighting, one-click "copy last month".
-- **Categories** — separate income and expense categories with colors; deleting a category keeps its transactions (they become *Uncategorized*).
-
-## Tech stack
-
-| Layer | Choice |
-| --- | --- |
-| UI | React 18 + TypeScript, bundled with Vite |
-| Desktop shell | Electron (context isolation + sandboxed renderer, typed IPC bridge) |
-| Backend | Node.js in the Electron main process |
-| Database | SQLite via [sql.js](https://github.com/sql-js/sql.js) (WebAssembly — no native modules to compile) |
-| Packaging | electron-builder (NSIS installer + portable exe) |
-
-The database file lives at `%APPDATA%/SpendTracker/spend-tracker.sqlite` and is written atomically after every mutation.
-
-## Development
+## Local development
 
 ```bash
 npm install
-npm run dev        # Vite dev server + Electron with hot reload for the UI
+npm run dev          # Vite dev server on http://localhost:5174, proxies /api to PHP on :8124
 ```
 
-Other scripts:
+For the API during dev you need PHP with `pdo_mysql` or `pdo_sqlite`. Point `api/app/config.php` at a SQLite file for the easiest setup:
 
-| Script | What it does |
-| --- | --- |
-| `npm run build` | Typecheck (renderer + main), build the renderer, bundle main/preload with esbuild |
-| `npm run smoke` | Headless end-to-end test: DB round trip, FK actions, React mount, IPC bridge |
-| `npm run start` | Run the production build in Electron |
-| `npm run icon` | Regenerate `buildResources/icon.ico` (pure-Node PNG/ICO encoder, no image deps) |
-| `npm run dist` | Full build + icon + `electron-builder --win` |
+```php
+'db' => [ 'dsn' => 'sqlite:' . __DIR__ . '/data.sqlite' ],
+```
 
-## Building the Windows executables
+Then serve the assembled folder:
 
 ```bash
-npm run dist
+npm run build && npm run assemble
+php -S 127.0.0.1:8124 -t deploy deploy/router.php
 ```
 
-Outputs in `release/`:
+## Testing
 
-- `SpendTracker-Setup-1.0.0.exe` — NSIS installer (per-user, choosable install dir, Start-menu + desktop shortcut)
-- `SpendTracker-1.0.0-portable.exe` — single-file portable build, no install needed
-- `release/win-unpacked/SpendTracker.exe` — raw unpacked app
+```bash
+# start a PHP server on :8124 serving deploy/ (see above), then:
+API_BASE=http://127.0.0.1:8124 npm run test:api
+```
 
-The binaries are unsigned, so Windows SmartScreen may show a "More info → Run anyway" prompt on first launch.
+`test/api-test.mjs` is a 48-assertion end-to-end suite covering auth (register/login/logout, session, CSRF, throttling), full CRUD, report math, budget upsert/copy, foreign-key behavior, and cross-user data isolation. It has been run green against both SQLite and MariaDB 10.4.
 
-## Architecture notes
+## Security model
 
-- `electron/main.ts` — window management, IPC handlers, `--smoke-test` mode.
-- `electron/db.ts` — the whole data layer: schema, seeding, validation, queries, reports. sql.js keeps the DB in memory; every mutation exports it and atomically replaces the file on disk. (Note: `export()` reopens the connection, so `PRAGMA foreign_keys` is re-applied after each persist and `last_insert_rowid()` is read before persisting.)
-- `electron/preload.ts` — exposes the typed `window.api` bridge (`shared/types.ts` is the single source of truth for the contract).
-- `src/` — React renderer; pages fetch through `window.api` only, no Node access.
-- Money is stored as **integer cents** end to end; formatting happens only at the UI edge.
+- Every data query is scoped to the authenticated `user_id`; ownership of referenced categories is verified on write (no IDOR).
+- Mutations require a valid CSRF token (`X-CSRF-Token`) plus a same-origin check; the token rotates on login/logout.
+- Sessions use an HttpOnly, SameSite=Lax cookie; `Secure` is set automatically under HTTPS. `session_regenerate_id` runs on every login.
+- Login/register/Google endpoints are rate-limited per IP (and per email for login).
+- Google ID tokens are verified against Google's tokeninfo endpoint with audience, issuer, expiry and `email_verified` checks.
+- `api/app/` is blocked from direct web access; `config.php` (with your DB password) is never served.
+- Response headers include a strict Content-Security-Policy, `X-Content-Type-Options`, `X-Frame-Options`, and `Referrer-Policy`.

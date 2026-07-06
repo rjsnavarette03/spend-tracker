@@ -1,4 +1,4 @@
-// Assembles the ready-to-upload site in web/deploy/:
+// Assembles the ready-to-upload site in deploy/:
 //   deploy/
 //     index.html, assets/, icon.png     <- built frontend (dist/)
 //     .htaccess                         <- rewrites + security headers
