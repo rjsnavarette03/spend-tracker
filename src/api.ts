@@ -2,6 +2,7 @@ import type {
   AccountType,
   Api,
   AuthResponse,
+  BudgetCadence,
   MeResponse,
   TransferInput,
   TxFilter,
@@ -154,6 +155,8 @@ export const api: Api = {
         'GET',
         `/transactions${qs({
           month: filter.month,
+          from: filter.from,
+          to: filter.to,
           type: filter.type === 'all' ? undefined : filter.type,
           categoryId: filter.categoryId === 'all' ? undefined : filter.categoryId,
           accountId: filter.accountId === 'all' ? undefined : filter.accountId,
@@ -165,19 +168,15 @@ export const api: Api = {
     remove: (id: number) => http('DELETE', `/transactions/${id}`),
   },
   budgets: {
-    list: (month: string) => http('GET', `/budgets${qs({ month })}`),
-    upsert: (categoryId: number, month: string, amountCents: number) =>
-      http('PUT', '/budgets', { categoryId, month, amountCents }),
-    copyFromPrevious: async (month: string) => {
-      const r = await http<{ copied: number }>('POST', '/budgets/copy', { month });
-      return r.copied;
-    },
+    list: () => http('GET', '/budgets'),
+    upsert: (categoryId: number, cadence: BudgetCadence, amountCents: number) =>
+      http('PUT', '/budgets', { categoryId, cadence, amountCents }),
   },
   reports: {
-    summary: (month: string) => http('GET', `/reports/summary${qs({ month })}`),
+    summary: (from: string, to: string) => http('GET', `/reports/summary${qs({ from, to })}`),
     trend: (endMonth: string, count: number) =>
       http('GET', `/reports/trend${qs({ endMonth, count })}`),
-    breakdown: (month: string, type: TxType) =>
-      http('GET', `/reports/breakdown${qs({ month, type })}`),
+    breakdown: (from: string, to: string, type: TxType) =>
+      http('GET', `/reports/breakdown${qs({ from, to, type })}`),
   },
 };

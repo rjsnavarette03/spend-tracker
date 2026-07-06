@@ -398,6 +398,30 @@ select {
   width: 148px;
 }
 
+/* Day / Week / Month / Year selector (components/PeriodPicker.tsx) */
+.period-picker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.gran-segmented button {
+  padding: 6px 12px;
+  font-size: 12.5px;
+}
+.period-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.period-label {
+  min-width: 132px;
+  text-align: center;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text);
+}
+
 .segmented {
   display: inline-flex;
   border: 1px solid var(--border-strong);
@@ -1552,6 +1576,31 @@ select {
 
 .money-input.budget-money input {
   text-align: right;
+}
+
+/* Per-row cadence selector on the Budgets page. */
+select.budget-cadence {
+  width: 110px;
+  padding: 7px 9px;
+}
+
+/* Small faint "/wk" "/mo" "/yr" tag next to a budget amount on the Dashboard. */
+.cadence-tag {
+  margin-left: 3px;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+/* "Unsaved changes" indicator next to the Budgets Save button. */
+.unsaved-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--amber, #f59e0b);
+  white-space: nowrap;
 }
 
 /* ---------- net worth card ---------- */

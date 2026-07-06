@@ -164,6 +164,114 @@ final class DB
                 : 'ALTER TABLE accounts ADD COLUMN image MEDIUMTEXT NULL';
             self::tryDdl($col);
         }
+
+        // Step 5: budgets month -> cadence (per-category recurring budgets).
+        // The old model keyed a budget to a specific YYYY-MM (one row per
+        // category per month). The new model is a single recurring rule per
+        // category with a cadence (week/month/year). Migrate by collapsing each
+        // category's rows to its most recent month's amount, cadence 'month'.
+        self::migrateBudgetsToCadence($driver);
+    }
+
+    /** True if `SELECT $col FROM $table` works (i.e. the column exists). */
+    private static function columnExists(string $table, string $col): bool
+    {
+        assert(self::$pdo !== null);
+        try {
+            self::$pdo->query("SELECT $col FROM $table LIMIT 1");
+            return true;
+        } catch (PDOException) {
+            return false;
+        }
+    }
+
+    /** MySQL/MariaDB: does a named index exist on $table? */
+    private static function mysqlIndexExists(string $table, string $index): bool
+    {
+        assert(self::$pdo !== null);
+        return (int) self::$pdo->query(
+            "SELECT COUNT(*) FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = '$table'
+               AND INDEX_NAME = '$index'"
+        )->fetchColumn() > 0;
+    }
+
+    /**
+     * Idempotent, self-healing migration of the budgets table from the
+     * month-keyed model to the recurring per-category cadence model.
+     *  - MySQL: in-place ALTERs (the table never disappears). Driven off the
+     *    new UNIQUE index (added LAST) as the "done" marker, with every step
+     *    individually guarded, so a run interrupted part-way re-completes.
+     *  - SQLite: can't DROP a column that participates in a UNIQUE constraint,
+     *    so the table is rebuilt. Nothing references budgets via FK, so this is
+     *    safe. SQLite is dev/test only.
+     */
+    private static function migrateBudgetsToCadence(string $driver): void
+    {
+        assert(self::$pdo !== null);
+
+        if ($driver === 'sqlite') {
+            // Fresh DBs already have cadence; only legacy month-keyed DBs migrate.
+            if (self::columnExists('budgets', 'cadence') || !self::columnExists('budgets', 'month')) {
+                return;
+            }
+            self::tryDdl(
+                "CREATE TABLE IF NOT EXISTS budgets_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+                    cadence TEXT NOT NULL DEFAULT 'month' CHECK (cadence IN ('week','month','year')),
+                    amount_cents INTEGER NOT NULL,
+                    UNIQUE (category_id)
+                 )"
+            );
+            // Keep each category's most-recent month amount as its monthly rule.
+            self::tryDdl(
+                "INSERT INTO budgets_new (id, user_id, category_id, cadence, amount_cents)
+                 SELECT b.id, b.user_id, b.category_id, 'month', b.amount_cents
+                 FROM budgets b
+                 WHERE b.month = (SELECT MAX(b2.month) FROM budgets b2 WHERE b2.category_id = b.category_id)"
+            );
+            self::tryDdl('DROP TABLE budgets');
+            self::tryDdl('ALTER TABLE budgets_new RENAME TO budgets');
+            self::tryDdl('CREATE INDEX IF NOT EXISTS idx_budgets_user ON budgets(user_id)');
+            return;
+        }
+
+        // MySQL / MariaDB. Fully migrated once cadence exists AND the legacy
+        // month column is gone — dropping month is the last correctness-
+        // critical step (upsert INSERTs omit month; a lingering NOT NULL month
+        // would reject them), so it's the right "done" marker.
+        if (self::columnExists('budgets', 'cadence') && !self::columnExists('budgets', 'month')) {
+            return;
+        }
+        if (!self::columnExists('budgets', 'cadence')) {
+            self::tryDdl("ALTER TABLE budgets ADD COLUMN cadence ENUM('week','month','year') NOT NULL DEFAULT 'month'");
+        }
+        if (self::columnExists('budgets', 'month')) {
+            // Collapse to one row per category: drop every row that has a newer
+            // month (tie-break: higher id) for the same category. Must run
+            // before the new UNIQUE(category_id) index can be added.
+            self::tryDdl(
+                'DELETE b1 FROM budgets b1
+                 JOIN budgets b2 ON b1.category_id = b2.category_id
+                   AND (b2.month > b1.month OR (b2.month = b1.month AND b2.id > b1.id))'
+            );
+        }
+        // Add the new index BEFORE dropping the old one: the category_id
+        // foreign key needs an index to lean on, and MySQL refuses to drop
+        // uniq_budgets_cat_month (errno 1553) while it's the FK's only backing
+        // index. uniq_budgets_cat gives the FK somewhere else to land first.
+        if (!self::mysqlIndexExists('budgets', 'uniq_budgets_cat')) {
+            self::tryDdl('ALTER TABLE budgets ADD UNIQUE KEY uniq_budgets_cat (category_id)');
+        }
+        if (self::mysqlIndexExists('budgets', 'uniq_budgets_cat_month')) {
+            self::tryDdl('ALTER TABLE budgets DROP INDEX uniq_budgets_cat_month');
+        }
+        if (self::columnExists('budgets', 'month')) {
+            self::tryDdl('ALTER TABLE budgets DROP COLUMN month');
+        }
     }
 
     /**

@@ -121,6 +121,15 @@ final class Validate
         return $t;
     }
 
+    /** Budget cadence: the recurring period a budget amount applies to. */
+    public static function cadence(mixed $c): string
+    {
+        if ($c !== 'week' && $c !== 'month' && $c !== 'year') {
+            throw new ApiError('Invalid cadence', 422);
+        }
+        return $c;
+    }
+
     /**
      * Optional custom account image, stored inline as a base64 data URI.
      * null / '' means "no image" (the account falls back to its color).

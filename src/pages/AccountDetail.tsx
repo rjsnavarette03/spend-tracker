@@ -18,7 +18,7 @@ const TYPE_LABELS: Record<string, string> = {
 };
 
 export function AccountDetail() {
-  const { month, categories, accounts, onDataChanged } = useAppContext();
+  const { period, categories, accounts, onDataChanged } = useAppContext();
   const params = useParams();
   const id = Number(params.id);
   const account = accounts.find((a) => a.id === id) ?? null;
@@ -305,7 +305,7 @@ export function AccountDetail() {
           initial={txModal.editing}
           categories={categories}
           accounts={accounts}
-          defaultMonth={month}
+          defaultMonth={period.start.slice(0, 7)}
           defaultAccountId={account.id}
           lockType={!txModal.editing && account.type === 'credit' ? 'expense' : undefined}
           onClose={() => setTxModal({ open: false, editing: null })}

@@ -243,29 +243,58 @@ let txId = 0;
 
   const bd = await a.call('GET', `/reports/breakdown?month=${MONTH}&type=expense`);
   check('breakdown groups by category', bd.data.length === 1 && bd.data[0].totalCents === 111111);
+
+  // date-range (from/to) filtering — powers the day / week / month / year views
+  const [my, mm] = MONTH.split('-').map(Number);
+  const monthTo = `${MONTH}-${String(new Date(my, mm, 0).getDate()).padStart(2, '0')}`;
+  const rs = await a.call('GET', `/reports/summary?from=${MONTH}-01&to=${monthTo}`);
+  check('summary from/to matches month', rs.data.incomeCents === 500000 && rs.data.expenseCents === 111111, JSON.stringify(rs.data));
+  const rsEmpty = await a.call('GET', `/reports/summary?from=1999-01-01&to=1999-12-31`);
+  check('summary from/to excludes out-of-range', rsEmpty.data.incomeCents === 0 && rsEmpty.data.expenseCents === 0);
+  const rbd = await a.call('GET', `/reports/breakdown?from=${MONTH}-01&to=${monthTo}&type=expense`);
+  check('breakdown from/to matches month', rbd.data.length === 1 && rbd.data[0].totalCents === 111111);
+  const rtx = await a.call('GET', `/transactions?from=${MONTH}-01&to=${monthTo}`);
+  const mtx = await a.call('GET', `/transactions?month=${MONTH}`);
+  check('transactions from/to matches month', rtx.data.length === mtx.data.length && rtx.data.length > 0, `${rtx.data.length} vs ${mtx.data.length}`);
+  const rtxEmpty = await a.call('GET', `/transactions?from=1999-01-01&to=1999-12-31`);
+  check('transactions from/to excludes out-of-range', rtxEmpty.data.length === 0);
 }
 
-// ---------- budgets ----------
+// ---------- budgets (recurring, per-category cadence) ----------
 {
-  const put = await a.call('PUT', '/budgets', { categoryId: catId, month: MONTH, amountCents: 200000 });
+  // Assumes the test runner and server share the calendar day. A fresh
+  // category + a single today-dated expense makes "spent this period" exact:
+  // today falls inside the current week AND month AND year.
+  const TODAY = new Date().toISOString().slice(0, 10);
+  const bc = await a.call('POST', '/categories', { name: 'BudgetProbe', type: 'expense', color: '#123456' });
+  const bcId = bc.data.id;
+  const btx = await a.call('POST', '/transactions', {
+    amountCents: 5000, type: 'expense', categoryId: bcId, accountId: null, date: TODAY, note: 'probe',
+  });
+
+  const put = await a.call('PUT', '/budgets', { categoryId: bcId, cadence: 'month', amountCents: 200000 });
   check('upsert budget', put.status === 200);
 
-  await a.call('PUT', '/budgets', { categoryId: seededGroceriesId, month: PREV_MONTH, amountCents: 40000 });
+  const list = await a.call('GET', '/budgets');
+  const row = list.data.find((r) => r.categoryId === bcId);
+  check('budget row has amount, cadence, spent-this-period',
+    row?.amountCents === 200000 && row?.cadence === 'month' && row?.spentCents === 5000, JSON.stringify(row));
 
-  const list = await a.call('GET', `/budgets?month=${MONTH}`);
-  const row = list.data.find((r) => r.categoryId === catId);
-  check('budget row has amount + spent', row?.amountCents === 200000 && row?.spentCents === 111111, JSON.stringify(row));
+  const put2 = await a.call('PUT', '/budgets', { categoryId: bcId, cadence: 'week', amountCents: 250000 });
+  const row2 = (await a.call('GET', '/budgets')).data.find((r) => r.categoryId === bcId);
+  check('upsert overwrites amount + cadence',
+    put2.status === 200 && row2?.amountCents === 250000 && row2?.cadence === 'week' && row2?.spentCents === 5000, JSON.stringify(row2));
 
-  const put2 = await a.call('PUT', '/budgets', { categoryId: catId, month: MONTH, amountCents: 250000 });
-  const list2 = await a.call('GET', `/budgets?month=${MONTH}`);
-  check('upsert overwrites', put2.status === 200 && list2.data.find((r) => r.categoryId === catId)?.amountCents === 250000);
+  const badCad = await a.call('PUT', '/budgets', { categoryId: bcId, cadence: 'decade', amountCents: 100 });
+  check('invalid cadence -> 422', badCad.status === 422, `got ${badCad.status}`);
 
-  const copied = await a.call('POST', '/budgets/copy', { month: MONTH });
-  check('copy skips existing, copies groceries', copied.data.copied === 1, JSON.stringify(copied.data));
+  const del = await a.call('PUT', '/budgets', { categoryId: bcId, cadence: 'month', amountCents: 0 });
+  const row3 = (await a.call('GET', '/budgets')).data.find((r) => r.categoryId === bcId);
+  check('zero deletes budget', del.status === 200 && row3?.amountCents === 0);
 
-  const del = await a.call('PUT', '/budgets', { categoryId: catId, month: MONTH, amountCents: 0 });
-  const list3 = await a.call('GET', `/budgets?month=${MONTH}`);
-  check('zero deletes budget', del.status === 200 && list3.data.find((r) => r.categoryId === catId)?.amountCents === 0);
+  // Remove probe data so later transaction/category assertions are unaffected.
+  await a.call('DELETE', `/transactions/${btx.data.id}`);
+  await a.call('DELETE', `/categories/${bcId}`);
 }
 
 // ---------- accounts & transfers ----------
@@ -468,7 +497,7 @@ let bankId = 0;
   const stealTx = await b.call('DELETE', `/transactions/${txId}`);
   check('B cannot delete A transaction -> 404', stealTx.status === 404);
 
-  const stealBudget = await b.call('PUT', '/budgets', { categoryId: catId, month: MONTH, amountCents: 1 });
+  const stealBudget = await b.call('PUT', '/budgets', { categoryId: catId, cadence: 'month', amountCents: 1 });
   check('B cannot budget A category -> 422', stealBudget.status === 422);
 
   const stealTxCat = await b.call('POST', '/transactions', {
@@ -509,7 +538,7 @@ let bankId = 0;
 
 // ---------- FK behavior: delete category -> tx uncategorized, budget gone ----------
 {
-  await a.call('PUT', '/budgets', { categoryId: catId, month: MONTH, amountCents: 5000 });
+  await a.call('PUT', '/budgets', { categoryId: catId, cadence: 'month', amountCents: 5000 });
   const del = await a.call('DELETE', `/categories/${catId}`);
   check('delete category', del.status === 200);
 
@@ -517,7 +546,7 @@ let bankId = 0;
   const orphan = txs.data.find((t) => t.id === txId);
   check('tx becomes uncategorized', orphan && orphan.categoryId === null && orphan.categoryName === null, JSON.stringify(orphan));
 
-  const budgets = await a.call('GET', `/budgets?month=${MONTH}`);
+  const budgets = await a.call('GET', '/budgets');
   check('budget rows for deleted category are gone', !budgets.data.some((r) => r.categoryId === catId));
 }
 

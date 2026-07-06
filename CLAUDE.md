@@ -70,8 +70,8 @@ GET  /categories                        POST /categories            { name, type
 PUT  /categories/:id  { name, color }   DELETE /categories/:id
 GET  /transactions?month&type&categoryId&search
 POST /transactions   (TxInput)          PUT/DELETE /transactions/:id
-GET  /budgets?month                     PUT /budgets { categoryId, month, amountCents }   (0 deletes)
-POST /budgets/copy   { month } → { copied }
+GET  /budgets                           PUT /budgets { categoryId, cadence, amountCents }  (0 deletes)
+     (budgets are recurring per-category rules; cadence = week|month|year)
 GET  /reports/summary?month             GET /reports/trend?endMonth&count
 GET  /reports/breakdown?month&type
 ```
@@ -86,8 +86,8 @@ GET  /reports/breakdown?month&type
 
 ### Gotchas
 - **`config.php` is gitignored and required** — the API returns 500 ("Server not configured") without it. Always `cp config.sample.php config.php` per environment. `assemble` never creates it (so DB creds can't be committed) and redeploys must never overwrite it.
-- **DB auto-migration**: `DB::ensureSchema` probes the newest table (`password_resets`); if missing it re-runs the full `CREATE ... IF NOT EXISTS` schema (idempotent, preserves data). **When you add a table: add it to both schema files AND update the probe table name in `db.php`.**
-- **Dialect branching**: `Repo::upsertBudget` uses SQLite `ON CONFLICT` vs MySQL `ON DUPLICATE KEY UPDATE` (`DB::driver()`). Keep the `UNIQUE(category_id, month)` constraint in both schemas or upsert breaks.
+- **DB auto-migration**: `DB::ensureSchema` probes the newest table (`transfers`); if missing it re-runs the full `CREATE ... IF NOT EXISTS` schema (idempotent, preserves data). **When you add a table: add it to both schema files AND update the probe table name in `db.php`.** Schema *changes* to existing tables can't ride the replay (CREATE IF NOT EXISTS won't alter) — add an idempotent, self-healing migration step instead (see `migrateBudgetsToCadence`: MySQL does in-place guarded ALTERs keyed off the final index; SQLite rebuilds the table since it can't drop a column inside a UNIQUE constraint).
+- **Dialect branching**: `Repo::upsertBudget` uses SQLite `ON CONFLICT` vs MySQL `ON DUPLICATE KEY UPDATE` (`DB::driver()`). Keep the `UNIQUE(category_id)` constraint on `budgets` in both schemas or upsert breaks.
 - Reset emails go through PHP `mail()`; set `mail_log_file` in config to write them to a file instead (local/test). Deliverability on shared hosting is imperfect — for production, `mail_from` should be a real mailbox on the domain.
 - Category delete → transactions `SET NULL` (become "Uncategorized"), budgets `CASCADE`. Users cascade-delete everything.
 

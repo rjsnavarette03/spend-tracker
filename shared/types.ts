@@ -87,17 +87,24 @@ export interface TxInput {
 
 export interface TxFilter {
   month?: string; // YYYY-MM
+  from?: string; // YYYY-MM-DD inclusive (date-range filter)
+  to?: string; // YYYY-MM-DD inclusive
   type?: TxType | 'all';
   categoryId?: number | 'all';
   accountId?: number | 'all';
   search?: string;
 }
 
-// One row per expense category for a given month (budget may be unset = 0).
+// The recurring period a budget amount applies to.
+export type BudgetCadence = 'week' | 'month' | 'year';
+
+// One row per expense category (budget may be unset = amount 0). A category has
+// at most one recurring budget. `spentCents` is the category's expense total in
+// the current period of `cadence` (this week / this month / this year).
 export interface Budget {
   id: number;
   categoryId: number;
-  month: string; // YYYY-MM
+  cadence: BudgetCadence;
   amountCents: number;
   categoryName: string;
   categoryColor: string;
@@ -174,13 +181,12 @@ export interface Api {
     remove(id: number): Promise<void>;
   };
   budgets: {
-    list(month: string): Promise<Budget[]>;
-    upsert(categoryId: number, month: string, amountCents: number): Promise<void>;
-    copyFromPrevious(month: string): Promise<number>;
+    list(): Promise<Budget[]>;
+    upsert(categoryId: number, cadence: BudgetCadence, amountCents: number): Promise<void>;
   };
   reports: {
-    summary(month: string): Promise<MonthlySummary>;
+    summary(from: string, to: string): Promise<MonthlySummary>;
     trend(endMonth: string, count: number): Promise<MonthlySummary[]>;
-    breakdown(month: string, type: TxType): Promise<BreakdownRow[]>;
+    breakdown(from: string, to: string, type: TxType): Promise<BreakdownRow[]>;
   };
 }

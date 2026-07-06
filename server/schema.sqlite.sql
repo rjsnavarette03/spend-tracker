@@ -54,13 +54,14 @@ CREATE INDEX IF NOT EXISTS idx_transactions_category ON transactions(category_id
 -- even on a pre-accounts DB (where CREATE TABLE is skipped), failing with
 -- "no such column: account_id". Keeping it out of the replay avoids that.
 
+-- One recurring budget per expense category (see MySQL schema for notes).
 CREATE TABLE IF NOT EXISTS budgets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
-    month TEXT NOT NULL,
+    cadence TEXT NOT NULL DEFAULT 'month' CHECK (cadence IN ('week','month','year')),
     amount_cents INTEGER NOT NULL,
-    UNIQUE (category_id, month)
+    UNIQUE (category_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_budgets_user ON budgets(user_id);

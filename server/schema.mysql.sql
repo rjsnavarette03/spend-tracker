@@ -58,14 +58,17 @@ CREATE TABLE IF NOT EXISTS transactions (
     CONSTRAINT fk_transactions_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- One recurring budget per expense category. `cadence` is the period the
+-- amount applies to (weekly / monthly / yearly); there is at most one row
+-- per category (UNIQUE), so a category can't hold conflicting budgets.
 CREATE TABLE IF NOT EXISTS budgets (
     id INT UNSIGNED NOT NULL AUTO_INCREMENT,
     user_id INT UNSIGNED NOT NULL,
     category_id INT UNSIGNED NOT NULL,
-    month CHAR(7) NOT NULL,
+    cadence ENUM('week','month','year') NOT NULL DEFAULT 'month',
     amount_cents BIGINT NOT NULL,
     PRIMARY KEY (id),
-    UNIQUE KEY uniq_budgets_cat_month (category_id, month),
+    UNIQUE KEY uniq_budgets_cat (category_id),
     KEY idx_budgets_user (user_id),
     CONSTRAINT fk_budgets_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     CONSTRAINT fk_budgets_category FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE

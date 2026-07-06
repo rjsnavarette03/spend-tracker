@@ -133,6 +133,14 @@ final class Repo
             $where[] = 't.account_id = ?';
             $params[] = Validate::intId($filter['accountId']);
         }
+        if (isset($filter['from']) && $filter['from'] !== '') {
+            $where[] = 't.date >= ?';
+            $params[] = Validate::date($filter['from']);
+        }
+        if (isset($filter['to']) && $filter['to'] !== '') {
+            $where[] = 't.date <= ?';
+            $params[] = Validate::date($filter['to']);
+        }
         $search = trim((string)($filter['search'] ?? ''));
         if ($search !== '') {
             $like = '%' . strtolower(mb_substr($search, 0, 100)) . '%';
@@ -488,30 +496,65 @@ final class Repo
 
     // ---------- budgets ----------
 
-    /** @return array<int, array<string, mixed>> */
-    public static function listBudgets(int $uid, mixed $month): array
+    /**
+     * Inclusive [start, end] date range of the period of `cadence` that
+     * contains the server's "today". Weeks are Sunday-start, matching the
+     * frontend's periodOf('week'). Used to scope each recurring budget's
+     * "spent so far this period".
+     * @return array{0: string, 1: string}
+     */
+    private static function currentPeriodRange(string $cadence): array
     {
-        $month = Validate::month($month);
+        if ($cadence === 'week') {
+            $dow = (int)date('w'); // 0 = Sunday .. 6 = Saturday
+            $start = date('Y-m-d', strtotime("-{$dow} days"));
+            return [$start, date('Y-m-d', strtotime($start . ' +6 days'))];
+        }
+        if ($cadence === 'year') {
+            return [date('Y-01-01'), date('Y-12-31')];
+        }
+        return [date('Y-m-01'), date('Y-m-t')]; // month
+    }
+
+    /**
+     * One row per expense category (budget may be unset = amount 0). `spentCents`
+     * is the category's expense total within the current period of that row's
+     * cadence, so the progress shown is against the right window.
+     * @return array<int, array<string, mixed>>
+     */
+    public static function listBudgets(int $uid): array
+    {
+        [$wStart, $wEnd] = self::currentPeriodRange('week');
+        [$mStart, $mEnd] = self::currentPeriodRange('month');
+        [$yStart, $yEnd] = self::currentPeriodRange('year');
+
+        // Correlated subquery picks the spend window by the row's cadence
+        // (falling back to 'month' for as-yet-unbudgeted categories).
         $rows = DB::all(
             "SELECT COALESCE(b.id, 0) AS id,
                     c.id AS categoryId,
+                    COALESCE(b.cadence, 'month') AS cadence,
                     COALESCE(b.amount_cents, 0) AS amountCents,
                     c.name AS categoryName,
                     c.color AS categoryColor,
                     COALESCE((
                         SELECT SUM(t.amount_cents) FROM transactions t
-                        WHERE t.category_id = c.id AND t.type = 'expense' AND SUBSTR(t.date, 1, 7) = ?
+                        WHERE t.category_id = c.id AND t.type = 'expense'
+                          AND t.date >= CASE COALESCE(b.cadence, 'month')
+                                          WHEN 'week' THEN ? WHEN 'year' THEN ? ELSE ? END
+                          AND t.date <= CASE COALESCE(b.cadence, 'month')
+                                          WHEN 'week' THEN ? WHEN 'year' THEN ? ELSE ? END
                     ), 0) AS spentCents
              FROM categories c
-             LEFT JOIN budgets b ON b.category_id = c.id AND b.month = ?
+             LEFT JOIN budgets b ON b.category_id = c.id
              WHERE c.type = 'expense' AND c.user_id = ?
              ORDER BY LOWER(c.name)",
-            [$month, $month, $uid]
+            [$wStart, $yStart, $mStart, $wEnd, $yEnd, $mEnd, $uid]
         );
         return array_map(static fn(array $r): array => [
             'id' => (int)$r['id'],
             'categoryId' => (int)$r['categoryId'],
-            'month' => $month,
+            'cadence' => (string)$r['cadence'],
             'amountCents' => (int)$r['amountCents'],
             'categoryName' => (string)$r['categoryName'],
             'categoryColor' => (string)$r['categoryColor'],
@@ -519,70 +562,59 @@ final class Repo
         ], $rows);
     }
 
-    public static function upsertBudget(int $uid, mixed $categoryId, mixed $month, mixed $amountCents): void
+    public static function upsertBudget(int $uid, mixed $categoryId, mixed $cadence, mixed $amountCents): void
     {
         $categoryId = Validate::intId($categoryId);
-        $month = Validate::month($month);
+        $cadence = Validate::cadence($cadence);
         $amount = Validate::amountCents($amountCents, true);
         self::assertCategoryOwned($uid, $categoryId, 'expense');
 
         if ($amount === 0) {
             DB::exec(
-                'DELETE FROM budgets WHERE category_id = ? AND month = ? AND user_id = ?',
-                [$categoryId, $month, $uid]
+                'DELETE FROM budgets WHERE category_id = ? AND user_id = ?',
+                [$categoryId, $uid]
             );
             return;
         }
         if (DB::driver() === 'sqlite') {
             DB::exec(
-                'INSERT INTO budgets (user_id, category_id, month, amount_cents) VALUES (?, ?, ?, ?)
-                 ON CONFLICT (category_id, month) DO UPDATE SET amount_cents = excluded.amount_cents',
-                [$uid, $categoryId, $month, $amount]
+                'INSERT INTO budgets (user_id, category_id, cadence, amount_cents) VALUES (?, ?, ?, ?)
+                 ON CONFLICT (category_id) DO UPDATE SET cadence = excluded.cadence, amount_cents = excluded.amount_cents',
+                [$uid, $categoryId, $cadence, $amount]
             );
         } else {
             DB::exec(
-                'INSERT INTO budgets (user_id, category_id, month, amount_cents) VALUES (?, ?, ?, ?)
-                 ON DUPLICATE KEY UPDATE amount_cents = VALUES(amount_cents)',
-                [$uid, $categoryId, $month, $amount]
+                'INSERT INTO budgets (user_id, category_id, cadence, amount_cents) VALUES (?, ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE cadence = VALUES(cadence), amount_cents = VALUES(amount_cents)',
+                [$uid, $categoryId, $cadence, $amount]
             );
         }
-    }
-
-    public static function copyBudgetsFromPrevious(int $uid, mixed $month): int
-    {
-        $month = Validate::month($month);
-        [$y, $m] = array_map('intval', explode('-', $month));
-        $m--;
-        if ($m === 0) {
-            $m = 12;
-            $y--;
-        }
-        $prev = sprintf('%04d-%02d', $y, $m);
-
-        return DB::exec(
-            'INSERT INTO budgets (user_id, category_id, month, amount_cents)
-             SELECT b.user_id, b.category_id, ?, b.amount_cents
-             FROM budgets b
-             WHERE b.month = ? AND b.user_id = ?
-               AND NOT EXISTS (
-                   SELECT 1 FROM budgets b2 WHERE b2.category_id = b.category_id AND b2.month = ?
-               )',
-            [$month, $prev, $uid, $month]
-        );
     }
 
     // ---------- reports ----------
 
-    /** @return array<string, mixed> */
-    public static function summary(int $uid, mixed $month): array
+    /**
+     * Convert a YYYY-MM month into an inclusive [from, to] date range, so the
+     * legacy ?month= report param keeps working alongside ?from=&to=.
+     * @return array{0: string, 1: string}
+     */
+    public static function monthRange(mixed $month): array
     {
-        $month = Validate::month($month);
+        $m = Validate::month($month);
+        return [$m . '-01', date('Y-m-t', strtotime($m . '-01'))];
+    }
+
+    /** @return array<string, mixed> */
+    public static function summary(int $uid, mixed $from, mixed $to): array
+    {
+        $from = Validate::date($from);
+        $to = Validate::date($to);
         $rows = DB::all(
             'SELECT type, SUM(amount_cents) AS total FROM transactions
-             WHERE user_id = ? AND SUBSTR(date, 1, 7) = ? GROUP BY type',
-            [$uid, $month]
+             WHERE user_id = ? AND date >= ? AND date <= ? GROUP BY type',
+            [$uid, $from, $to]
         );
-        $out = ['month' => $month, 'incomeCents' => 0, 'expenseCents' => 0];
+        $out = ['month' => substr($from, 0, 7), 'incomeCents' => 0, 'expenseCents' => 0];
         foreach ($rows as $r) {
             if ($r['type'] === 'income') {
                 $out['incomeCents'] = (int)$r['total'];
@@ -642,9 +674,10 @@ final class Repo
     }
 
     /** @return array<int, array<string, mixed>> */
-    public static function breakdown(int $uid, mixed $month, mixed $type): array
+    public static function breakdown(int $uid, mixed $from, mixed $to, mixed $type): array
     {
-        $month = Validate::month($month);
+        $from = Validate::date($from);
+        $to = Validate::date($to);
         $type = Validate::type($type);
         $rows = DB::all(
             "SELECT t.category_id AS categoryId,
@@ -653,10 +686,10 @@ final class Repo
                     SUM(t.amount_cents) AS totalCents
              FROM transactions t
              LEFT JOIN categories c ON c.id = t.category_id
-             WHERE t.user_id = ? AND SUBSTR(t.date, 1, 7) = ? AND t.type = ?
+             WHERE t.user_id = ? AND t.date >= ? AND t.date <= ? AND t.type = ?
              GROUP BY t.category_id, c.name, c.color
              ORDER BY totalCents DESC",
-            [$uid, $month, $type]
+            [$uid, $from, $to, $type]
         );
         return array_map(static fn(array $r): array => [
             'categoryId' => $r['categoryId'] === null ? null : (int)$r['categoryId'],

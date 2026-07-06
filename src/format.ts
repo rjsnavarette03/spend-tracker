@@ -1,4 +1,4 @@
-import type { Transaction } from '../shared/types';
+import type { BudgetCadence, Transaction } from '../shared/types';
 
 // Active currency for money formatting. Set once from the signed-in user's
 // preference (see api.ts, which calls setCurrency on every auth response), so
@@ -140,6 +140,116 @@ export function shortMonthLabel(month: string): string {
   const [y, m] = month.split('-').map(Number);
   return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'short' });
 }
+
+// ---------- periods (day / week / month / year) ----------
+
+export type Granularity = 'day' | 'week' | 'month' | 'year';
+
+export interface Period {
+  granularity: Granularity;
+  start: string; // YYYY-MM-DD inclusive
+  end: string; // YYYY-MM-DD inclusive
+}
+
+function ymd(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** The period of the given granularity that contains the local date `ref`. */
+export function periodOf(granularity: Granularity, ref: Date): Period {
+  const y = ref.getFullYear();
+  const m = ref.getMonth();
+  const d = ref.getDate();
+  if (granularity === 'day') {
+    const s = ymd(new Date(y, m, d));
+    return { granularity, start: s, end: s };
+  }
+  if (granularity === 'week') {
+    const dow = ref.getDay(); // 0 = Sunday
+    return {
+      granularity,
+      start: ymd(new Date(y, m, d - dow)),
+      end: ymd(new Date(y, m, d - dow + 6)),
+    };
+  }
+  if (granularity === 'month') {
+    return { granularity, start: ymd(new Date(y, m, 1)), end: ymd(new Date(y, m + 1, 0)) };
+  }
+  return { granularity, start: ymd(new Date(y, 0, 1)), end: ymd(new Date(y, 11, 31)) };
+}
+
+export function currentPeriod(granularity: Granularity = 'month'): Period {
+  return periodOf(granularity, new Date());
+}
+
+/** Move a period by ±1 unit of its own granularity. */
+export function shiftPeriod(p: Period, delta: number): Period {
+  const [y, m, d] = p.start.split('-').map(Number);
+  switch (p.granularity) {
+    case 'day':
+      return periodOf('day', new Date(y, m - 1, d + delta));
+    case 'week':
+      return periodOf('week', new Date(y, m - 1, d + delta * 7));
+    case 'month':
+      return periodOf('month', new Date(y, m - 1 + delta, 1));
+    default:
+      return periodOf('year', new Date(y + delta, 0, 1));
+  }
+}
+
+/** Switch granularity, keeping today if the current period contains it. */
+export function changeGranularity(p: Period, granularity: Granularity): Period {
+  const today = todayStr();
+  const anchor = p.start <= today && today <= p.end ? today : p.start;
+  const [y, m, d] = anchor.split('-').map(Number);
+  return periodOf(granularity, new Date(y, m - 1, d));
+}
+
+export function periodLabel(p: Period): string {
+  const [sy, sm, sd] = p.start.split('-').map(Number);
+  const start = new Date(sy, sm - 1, sd);
+  if (p.granularity === 'day') {
+    return start.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+  if (p.granularity === 'month') {
+    return start.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  }
+  if (p.granularity === 'year') {
+    return String(sy);
+  }
+  const [ey, em, ed] = p.end.split('-').map(Number);
+  const end = new Date(ey, em - 1, ed);
+  const startStr = start.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    ...(sy === ey ? {} : { year: 'numeric' }),
+  });
+  const endStr = end.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  return `${startStr} – ${endStr}`;
+}
+
+// ---------- budget cadence ----------
+
+/** Dropdown labels for the cadence selector. */
+export const CADENCE_LABEL: Record<BudgetCadence, string> = {
+  week: 'Weekly',
+  month: 'Monthly',
+  year: 'Yearly',
+};
+
+/** Compact suffix tag next to a budget amount, e.g. "$500/mo". */
+export const CADENCE_SHORT: Record<BudgetCadence, string> = {
+  week: '/wk',
+  month: '/mo',
+  year: '/yr',
+};
+
+/** How the "spent" window reads for a cadence (spend is scoped to it). */
+export const CADENCE_PERIOD: Record<BudgetCadence, string> = {
+  week: 'this week',
+  month: 'this month',
+  year: 'this year',
+};
 
 export function dateLabel(date: string): string {
   const [y, m, d] = date.split('-').map(Number);

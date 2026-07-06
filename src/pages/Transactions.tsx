@@ -3,7 +3,7 @@ import type { Account, Category, Transaction, TxType } from '../../shared/types'
 import { api } from '../api';
 import { confirm, toast } from '../components/feedback';
 import { DownloadIcon, PencilIcon, PlusIcon, TrashIcon } from '../components/Icons';
-import { MonthPicker } from '../components/MonthPicker';
+import { PeriodPicker } from '../components/PeriodPicker';
 import { TransactionModal } from '../components/TransactionModal';
 import {
   cleanError,
@@ -11,19 +11,20 @@ import {
   downloadFile,
   fmtMoney,
   fmtSigned,
-  monthLabel,
+  periodLabel,
   transactionsToCsv,
 } from '../format';
+import type { Period } from '../format';
 
 export function Transactions({
-  month,
-  setMonth,
+  period,
+  setPeriod,
   categories,
   accounts,
   onDataChanged,
 }: {
-  month: string;
-  setMonth: (m: string) => void;
+  period: Period;
+  setPeriod: (p: Period) => void;
   categories: Category[];
   accounts: Account[];
   onDataChanged: () => void;
@@ -43,7 +44,8 @@ export function Transactions({
     try {
       setTxs(
         await api.transactions.list({
-          month,
+          from: period.start,
+          to: period.end,
           type: typeFilter,
           categoryId: catFilter === 'all' ? 'all' : Number(catFilter),
           search,
@@ -53,7 +55,7 @@ export function Transactions({
     } catch (err) {
       toast.error(cleanError(err));
     }
-  }, [month, typeFilter, catFilter, search]);
+  }, [period, typeFilter, catFilter, search]);
 
   useEffect(() => {
     void load();
@@ -82,7 +84,11 @@ export function Transactions({
   };
 
   const exportCsv = () => {
-    downloadFile(`transactions-${month}.csv`, transactionsToCsv(txs), 'text/csv;charset=utf-8');
+    downloadFile(
+      `transactions-${period.start}_${period.end}.csv`,
+      transactionsToCsv(txs),
+      'text/csv;charset=utf-8'
+    );
     setNotice(`Exported ${txs.length} ${txs.length === 1 ? 'entry' : 'entries'}`);
     setTimeout(() => setNotice(''), 4000);
   };
@@ -98,7 +104,7 @@ export function Transactions({
         <div>
           <h1 className="page-title">Transactions</h1>
           <div className="page-sub">
-            {txs.length} {txs.length === 1 ? 'entry' : 'entries'} in {monthLabel(month)}
+            {txs.length} {txs.length === 1 ? 'entry' : 'entries'} in {periodLabel(period)}
           </div>
         </div>
         <div className="head-actions">
@@ -115,7 +121,7 @@ export function Transactions({
       </div>
 
       <div className="toolbar">
-        <MonthPicker value={month} onChange={setMonth} />
+        <PeriodPicker value={period} onChange={setPeriod} />
         <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as TxType | 'all')}>
           <option value="all">All types</option>
           <option value="income">Income</option>
@@ -141,7 +147,7 @@ export function Transactions({
 
       {loaded && txs.length === 0 ? (
         <div className="empty-state">
-          No transactions match. Try a different month or filter, or add one.
+          No transactions match. Try a different period or filter, or add one.
           <br />
           <button
             className="btn btn-primary"
@@ -223,7 +229,7 @@ export function Transactions({
           initial={modal.editing}
           categories={categories}
           accounts={accounts}
-          defaultMonth={month}
+          defaultMonth={period.start.slice(0, 7)}
           onClose={() => setModal({ open: false, editing: null })}
           onSaved={afterMutation}
         />

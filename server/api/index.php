@@ -204,30 +204,33 @@ try {
     // ---------- budgets ----------
     if ($resource === 'budgets') {
         if ($method === 'GET' && $sub === '') {
-            Http::json(Repo::listBudgets($uid, $_GET['month'] ?? null));
+            Http::json(Repo::listBudgets($uid));
         }
         if ($method === 'PUT' && $sub === '') {
             $b = Http::readJson();
-            Repo::upsertBudget($uid, $b['categoryId'] ?? null, $b['month'] ?? null, $b['amountCents'] ?? null);
+            Repo::upsertBudget($uid, $b['categoryId'] ?? null, $b['cadence'] ?? null, $b['amountCents'] ?? null);
             Http::json(['ok' => true]);
-        }
-        if ($method === 'POST' && $sub === 'copy') {
-            $b = Http::readJson();
-            Http::json(['copied' => Repo::copyBudgetsFromPrevious($uid, $b['month'] ?? null)]);
         }
         throw new ApiError('Not found', 404);
     }
 
     // ---------- reports ----------
     if ($resource === 'reports' && $method === 'GET') {
+        // summary/breakdown accept an explicit ?from=&to= date range; a legacy
+        // ?month= is expanded to that month's first/last day.
+        $from = $_GET['from'] ?? null;
+        $to = $_GET['to'] ?? null;
+        if (($from === null || $from === '') && isset($_GET['month'])) {
+            [$from, $to] = Repo::monthRange($_GET['month']);
+        }
         if ($sub === 'summary') {
-            Http::json(Repo::summary($uid, $_GET['month'] ?? null));
+            Http::json(Repo::summary($uid, $from, $to));
         }
         if ($sub === 'trend') {
             Http::json(Repo::trend($uid, $_GET['endMonth'] ?? null, $_GET['count'] ?? 6));
         }
         if ($sub === 'breakdown') {
-            Http::json(Repo::breakdown($uid, $_GET['month'] ?? null, $_GET['type'] ?? null));
+            Http::json(Repo::breakdown($uid, $from, $to, $_GET['type'] ?? null));
         }
         throw new ApiError('Not found', 404);
     }

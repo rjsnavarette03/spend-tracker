@@ -11,11 +11,20 @@ import { api } from '../api';
 import { toast } from '../components/feedback';
 import { DonutChart } from '../components/DonutChart';
 import { PlusIcon } from '../components/Icons';
-import { MonthPicker } from '../components/MonthPicker';
+import { PeriodPicker } from '../components/PeriodPicker';
 import { ProgressBar } from '../components/ProgressBar';
 import { TransactionModal } from '../components/TransactionModal';
 import { TrendChart } from '../components/TrendChart';
-import { cleanError, dateLabel, fmtMoney, fmtSigned, monthLabel } from '../format';
+import {
+  CADENCE_PERIOD,
+  CADENCE_SHORT,
+  cleanError,
+  dateLabel,
+  fmtMoney,
+  fmtSigned,
+  periodLabel,
+} from '../format';
+import type { Period } from '../format';
 
 interface DashboardData {
   summary: MonthlySummary;
@@ -26,14 +35,14 @@ interface DashboardData {
 }
 
 export function Dashboard({
-  month,
-  setMonth,
+  period,
+  setPeriod,
   categories,
   accounts,
   onDataChanged,
 }: {
-  month: string;
-  setMonth: (m: string) => void;
+  period: Period;
+  setPeriod: (p: Period) => void;
   categories: Category[];
   accounts: Account[];
   onDataChanged: () => void;
@@ -41,20 +50,23 @@ export function Dashboard({
   const [data, setData] = useState<DashboardData | null>(null);
   const [showAdd, setShowAdd] = useState(false);
 
+  // Budgets & the 6-month trend stay monthly, keyed to the period's month.
+  const budgetMonth = period.start.slice(0, 7);
+
   const load = useCallback(async () => {
     try {
       const [summary, trend, breakdown, budgets, txs] = await Promise.all([
-        api.reports.summary(month),
-        api.reports.trend(month, 6),
-        api.reports.breakdown(month, 'expense'),
-        api.budgets.list(month),
-        api.transactions.list({ month }),
+        api.reports.summary(period.start, period.end),
+        api.reports.trend(budgetMonth, 6),
+        api.reports.breakdown(period.start, period.end, 'expense'),
+        api.budgets.list(),
+        api.transactions.list({ from: period.start, to: period.end }),
       ]);
       setData({ summary, trend, breakdown, budgets, recent: txs.slice(0, 8) });
     } catch (err) {
       toast.error(cleanError(err));
     }
-  }, [month]);
+  }, [period, budgetMonth]);
 
   useEffect(() => {
     void load();
@@ -64,10 +76,12 @@ export function Dashboard({
 
   const { summary, trend, breakdown, budgets, recent } = data;
   const net = summary.incomeCents - summary.expenseCents;
+  // Budgets are recurring rules at mixed cadences, so a single "% used" across
+  // all of them would be apples-to-oranges. Track how many are within limit
+  // (each compared against its own cadence's current period) instead.
   const activeBudgets = budgets.filter((b) => b.amountCents > 0);
-  const budgetTotal = activeBudgets.reduce((s, b) => s + b.amountCents, 0);
-  const budgetSpent = activeBudgets.reduce((s, b) => s + b.spentCents, 0);
-  const budgetPct = budgetTotal > 0 ? Math.round((budgetSpent / budgetTotal) * 100) : 0;
+  const overCount = activeBudgets.filter((b) => b.spentCents > b.amountCents).length;
+  const onTrack = activeBudgets.length - overCount;
   const savingsRate = summary.incomeCents > 0 ? Math.round((net / summary.incomeCents) * 100) : null;
   const topBudgets = [...activeBudgets].sort((a, b) => b.amountCents - a.amountCents).slice(0, 5);
 
@@ -76,10 +90,10 @@ export function Dashboard({
       <div className="page-head">
         <div>
           <h1 className="page-title">Dashboard</h1>
-          <div className="page-sub">{monthLabel(month)} overview</div>
+          <div className="page-sub">{periodLabel(period)} overview</div>
         </div>
         <div className="head-actions">
-          <MonthPicker value={month} onChange={setMonth} />
+          <PeriodPicker value={period} onChange={setPeriod} />
           <button className="btn btn-primary" onClick={() => setShowAdd(true)}>
             <PlusIcon /> Add transaction
           </button>
@@ -101,14 +115,16 @@ export function Dashboard({
           {savingsRate !== null && <div className="stat-sub">{savingsRate}% of income kept</div>}
         </div>
         <div className="stat-card">
-          <div className="stat-label">Budget used</div>
-          <div className={`stat-value ${budgetPct >= 100 ? 'red' : ''}`}>
-            {budgetTotal > 0 ? `${budgetPct}%` : '—'}
+          <div className="stat-label">Budgets on track</div>
+          <div className={`stat-value ${overCount > 0 ? 'red' : activeBudgets.length ? 'green' : ''}`}>
+            {activeBudgets.length ? `${onTrack}/${activeBudgets.length}` : '—'}
           </div>
           <div className="stat-sub">
-            {budgetTotal > 0
-              ? `${fmtMoney(budgetSpent)} of ${fmtMoney(budgetTotal)}`
-              : 'No budgets set for this month'}
+            {activeBudgets.length === 0
+              ? 'No budgets set'
+              : overCount > 0
+                ? `${overCount} over limit`
+                : 'All within budget'}
           </div>
         </div>
       </div>
@@ -140,7 +156,7 @@ export function Dashboard({
         <div className="panel">
           <div className="panel-title">Budgets</div>
           {topBudgets.length === 0 ? (
-            <div className="empty-state">No budgets for {monthLabel(month)} yet.</div>
+            <div className="empty-state">No budgets set yet.</div>
           ) : (
             <div className="budget-list">
               {topBudgets.map((b) => {
@@ -152,8 +168,9 @@ export function Dashboard({
                         <span className="color-dot" style={{ background: b.categoryColor }} />
                         {b.categoryName}
                       </span>
-                      <span className="nums">
+                      <span className="nums" title={`Spent ${CADENCE_PERIOD[b.cadence]}`}>
                         {fmtMoney(b.spentCents)} / {fmtMoney(b.amountCents)}
+                        <span className="cadence-tag">{CADENCE_SHORT[b.cadence]}</span>
                       </span>
                     </div>
                     <ProgressBar pct={pct} />
@@ -167,7 +184,7 @@ export function Dashboard({
           <div className="panel-title">Recent transactions</div>
           {recent.length === 0 ? (
             <div className="empty-state">
-              Nothing recorded in {monthLabel(month)}.
+              Nothing recorded in {periodLabel(period)}.
               <br />
               <button className="btn btn-primary" onClick={() => setShowAdd(true)}>
                 <PlusIcon /> Add your first transaction
@@ -205,7 +222,7 @@ export function Dashboard({
           initial={null}
           categories={categories}
           accounts={accounts}
-          defaultMonth={month}
+          defaultMonth={budgetMonth}
           onClose={() => setShowAdd(false)}
           onSaved={() => {
             void load();

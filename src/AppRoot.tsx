@@ -37,8 +37,8 @@ function DashboardPage() {
   const c = useAppContext();
   return (
     <Dashboard
-      month={c.month}
-      setMonth={c.setMonth}
+      period={c.period}
+      setPeriod={c.setPeriod}
       categories={c.categories}
       accounts={c.accounts}
       onDataChanged={c.onDataChanged}
@@ -49,8 +49,8 @@ function TransactionsPage() {
   const c = useAppContext();
   return (
     <Transactions
-      month={c.month}
-      setMonth={c.setMonth}
+      period={c.period}
+      setPeriod={c.setPeriod}
       categories={c.categories}
       accounts={c.accounts}
       onDataChanged={c.onDataChanged}
@@ -62,8 +62,7 @@ function AccountsPage() {
   return <Accounts accounts={c.accounts} onDataChanged={c.onDataChanged} />;
 }
 function BudgetsPage() {
-  const c = useAppContext();
-  return <Budgets month={c.month} setMonth={c.setMonth} />;
+  return <Budgets />;
 }
 function CategoriesPage() {
   const c = useAppContext();

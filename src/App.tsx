@@ -14,14 +14,15 @@ import {
   TargetIcon,
   WalletIcon,
 } from './components/Icons';
-import { currentMonth } from './format';
+import { currentPeriod } from './format';
+import type { Period } from './format';
 
 // Data shared across the app pages, provided by the layout's <Outlet> and read
 // by each page route via useAppContext(). Kept in the layout (which never
 // unmounts while navigating between pages) so month/categories/accounts persist.
 export interface AppContext {
-  month: string;
-  setMonth: (m: string) => void;
+  period: Period;
+  setPeriod: (p: Period) => void;
   categories: Category[];
   accounts: Account[];
   onDataChanged: () => void;
@@ -40,7 +41,7 @@ const NAV: Array<{ to: string; label: string; icon: JSX.Element }> = [
 ];
 
 export default function AppLayout({ user, onLogout }: { user: User; onLogout: () => void }) {
-  const [month, setMonth] = useState(currentMonth());
+  const [period, setPeriod] = useState<Period>(() => currentPeriod('month'));
   const [categories, setCategories] = useState<Category[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   // Local copy so hasPassword/hasGoogle can refresh after account changes.
@@ -84,7 +85,7 @@ export default function AppLayout({ user, onLogout }: { user: User; onLogout: ()
     void refreshAccounts();
   }, [refreshCategories, refreshAccounts]);
 
-  const ctx: AppContext = { month, setMonth, categories, accounts, onDataChanged };
+  const ctx: AppContext = { period, setPeriod, categories, accounts, onDataChanged };
 
   return (
     <div className="app">
