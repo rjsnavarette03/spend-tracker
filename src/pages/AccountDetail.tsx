@@ -6,8 +6,10 @@ import { useAppContext } from '../App';
 import { AccountEditModal } from '../components/AccountEditModal';
 import { PayModal } from '../components/PayModal';
 import { TransactionModal } from '../components/TransactionModal';
+import { TransferModal } from '../components/TransferModal';
+import { PencilIcon, TrashIcon } from '../components/Icons';
 import { cleanError, dateLabel, fmtMoney } from '../format';
-import { toast } from '../components/feedback';
+import { confirm, toast } from '../components/feedback';
 
 const TYPE_LABELS: Record<string, string> = {
   debit: 'Debit',
@@ -25,7 +27,14 @@ export function AccountDetail() {
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
-  const [txOpen, setTxOpen] = useState(false);
+  const [txModal, setTxModal] = useState<{ open: boolean; editing: Transaction | null }>({
+    open: false,
+    editing: null,
+  });
+  const [transferModal, setTransferModal] = useState<{ open: boolean; editing: Transfer | null }>({
+    open: false,
+    editing: null,
+  });
   const [editOpen, setEditOpen] = useState(false);
 
   const load = useCallback(async () => {
@@ -52,6 +61,38 @@ export function AccountDetail() {
   const afterMutation = () => {
     void load();
     onDataChanged();
+  };
+
+  const removeTx = async (t: Transaction) => {
+    const ok = await confirm({
+      title: 'Delete transaction',
+      message: `Delete this ${t.type} of ${fmtMoney(t.amountCents)}?`,
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api.transactions.remove(t.id);
+      afterMutation();
+    } catch (err) {
+      toast.error(cleanError(err));
+    }
+  };
+
+  const removeTransfer = async (tr: Transfer) => {
+    const ok = await confirm({
+      title: 'Delete transfer',
+      message: `Delete this transfer of ${fmtMoney(tr.amountCents)}?`,
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api.transfers.remove(tr.id);
+      afterMutation();
+    } catch (err) {
+      toast.error(cleanError(err));
+    }
   };
 
   // accounts are loaded by the layout; once present, a missing one is a real 404.
@@ -100,7 +141,7 @@ export function AccountDetail() {
           {account.type !== 'loan' && (
             <button
               className={account.type === 'debit' ? 'btn btn-primary' : 'btn'}
-              onClick={() => setTxOpen(true)}
+              onClick={() => setTxModal({ open: true, editing: null })}
             >
               Add transaction
             </button>
@@ -145,6 +186,7 @@ export function AccountDetail() {
                 <th>Category</th>
                 <th>Note</th>
                 <th style={{ textAlign: 'right' }}>Amount</th>
+                <th />
               </tr>
             </thead>
             <tbody>
@@ -164,6 +206,22 @@ export function AccountDetail() {
                   <td className={`num ${t.type === 'income' ? 'amount-income' : 'amount-expense'}`}>
                     {t.type === 'income' ? '+' : '−'}
                     {fmtMoney(t.amountCents)}
+                  </td>
+                  <td className="actions">
+                    <button
+                      className="btn-icon"
+                      title="Edit"
+                      onClick={() => setTxModal({ open: true, editing: t })}
+                    >
+                      <PencilIcon />
+                    </button>
+                    <button
+                      className="btn-icon danger"
+                      title="Delete"
+                      onClick={() => removeTx(t)}
+                    >
+                      <TrashIcon />
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -185,6 +243,7 @@ export function AccountDetail() {
                 <th>Date</th>
                 <th>Details</th>
                 <th style={{ textAlign: 'right' }}>Amount</th>
+                <th />
               </tr>
             </thead>
             <tbody>
@@ -208,6 +267,23 @@ export function AccountDetail() {
                       {delta < 0 ? '−' : '+'}
                       {fmtMoney(Math.abs(delta))}
                     </td>
+                    <td className="actions">
+                      <button
+                        className="btn-icon"
+                        title="Edit"
+                        onClick={() => setTransferModal({ open: true, editing: tr })}
+                        disabled={tr.fromAccountId === null || tr.toAccountId === null}
+                      >
+                        <PencilIcon />
+                      </button>
+                      <button
+                        className="btn-icon danger"
+                        title="Delete"
+                        onClick={() => removeTransfer(tr)}
+                      >
+                        <TrashIcon />
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
@@ -224,15 +300,23 @@ export function AccountDetail() {
           onSaved={afterMutation}
         />
       )}
-      {txOpen && (
+      {txModal.open && (
         <TransactionModal
-          initial={null}
+          initial={txModal.editing}
           categories={categories}
           accounts={accounts}
           defaultMonth={month}
           defaultAccountId={account.id}
-          lockType={account.type === 'credit' ? 'expense' : undefined}
-          onClose={() => setTxOpen(false)}
+          lockType={!txModal.editing && account.type === 'credit' ? 'expense' : undefined}
+          onClose={() => setTxModal({ open: false, editing: null })}
+          onSaved={afterMutation}
+        />
+      )}
+      {transferModal.open && (
+        <TransferModal
+          initial={transferModal.editing}
+          accounts={accounts}
+          onClose={() => setTransferModal({ open: false, editing: null })}
           onSaved={afterMutation}
         />
       )}

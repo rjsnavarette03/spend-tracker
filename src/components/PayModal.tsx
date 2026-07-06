@@ -26,6 +26,7 @@ export function PayModal({
 
   const [sourceId, setSourceId] = useState<string>(sources[0] ? String(sources[0].id) : '');
   const [amount, setAmount] = useState('');
+  const [fee, setFee] = useState('');
   const [date, setDate] = useState(todayStr());
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
@@ -43,6 +44,17 @@ export function PayModal({
       setError('Enter a positive amount, e.g. 500.00');
       return;
     }
+    // Optional fee: also leaves the source, but is NOT applied to the account
+    // being paid (transfer math credits only the amount to the target).
+    let feeCents = 0;
+    if (fee.trim() !== '') {
+      const parsedFee = parseAmountToCents(fee);
+      if (parsedFee === null) {
+        setError('Fee must be a positive amount, or leave it empty');
+        return;
+      }
+      feeCents = parsedFee;
+    }
     if (!date) {
       setError('Pick a date');
       return;
@@ -53,7 +65,7 @@ export function PayModal({
         fromAccountId: Number(sourceId),
         toAccountId: account.id,
         amountCents,
-        feeCents: 0,
+        feeCents,
         date,
         note: note.trim() || `Payment to ${account.name}`,
       });
@@ -85,9 +97,15 @@ export function PayModal({
           </select>
         </div>
 
-        <div className="field">
-          <label htmlFor="pay-amount">Amount</label>
-          <MoneyInput id="pay-amount" value={amount} onChange={setAmount} />
+        <div className="form-row">
+          <div className="field">
+            <label htmlFor="pay-amount">Amount</label>
+            <MoneyInput id="pay-amount" value={amount} onChange={setAmount} />
+          </div>
+          <div className="field">
+            <label htmlFor="pay-fee">Fee (optional)</label>
+            <MoneyInput id="pay-fee" value={fee} onChange={setFee} />
+          </div>
         </div>
 
         <div className="field">
@@ -108,7 +126,8 @@ export function PayModal({
         </div>
 
         <div className="field-hint">
-          The amount is deducted from the source account and applied to {account.name}.
+          The amount plus any fee is deducted from the source account; only the amount is applied
+          to {account.name} — the fee doesn't reduce what you owe.
         </div>
 
         {error && <div className="form-error">{error}</div>}
