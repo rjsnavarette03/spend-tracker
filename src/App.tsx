@@ -111,13 +111,15 @@ export default function AppLayout({ user, onLogout }: { user: User; onLogout: ()
         <div className="sidebar-foot">
           <div className="user-line" title={account.email}>
             <span className="user-email">{account.name || account.email}</span>
-            <ThemeToggle />
-            <button className="btn-icon" onClick={() => setShowAccount(true)} title="Account settings">
-              <SettingsIcon />
-            </button>
-            <button className="btn-icon" onClick={onLogout} title="Sign out">
-              <LogoutIcon />
-            </button>
+            <div className="user-actions">
+              <ThemeToggle />
+              <button className="btn-icon" onClick={() => setShowAccount(true)} title="Account settings">
+                <SettingsIcon />
+              </button>
+              <button className="btn-icon logout-btn" onClick={onLogout} title="Sign out">
+                <LogoutIcon />
+              </button>
+            </div>
           </div>
         </div>
       </aside>
