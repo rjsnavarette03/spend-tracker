@@ -259,7 +259,7 @@ final class Repo
     public static function listAccounts(int $uid): array
     {
         $rows = DB::all(
-            "SELECT a.id, a.name, a.type, a.color,
+            "SELECT a.id, a.name, a.type, a.color, a.image,
                     a.opening_balance_cents AS openingBalanceCents,
                     a.opening_balance_cents
                     + COALESCE((SELECT SUM(CASE WHEN t.type = 'income' THEN t.amount_cents ELSE -t.amount_cents END)
@@ -282,6 +282,7 @@ final class Repo
             'name' => (string)$r['name'],
             'type' => (string)$r['type'],
             'color' => (string)$r['color'],
+            'image' => $r['image'] === null ? null : (string)$r['image'],
             'openingBalanceCents' => (int)$r['openingBalanceCents'],
             'balanceCents' => (int)$r['balanceCents'],
             'txCount' => (int)$r['txCount'],
@@ -305,21 +306,23 @@ final class Repo
     }
 
     /** @return array<string, mixed> */
-    public static function createAccount(int $uid, mixed $name, mixed $type, mixed $color, mixed $openingBalanceCents): array
+    public static function createAccount(int $uid, mixed $name, mixed $type, mixed $color, mixed $openingBalanceCents, mixed $image = null): array
     {
         $name = Validate::name($name);
         $type = Validate::accountType($type);
         $color = Validate::color($color);
+        $image = Validate::accountImage($image);
         $opening = self::signedOpening($type, $openingBalanceCents);
         $id = DB::insert(
-            'INSERT INTO accounts (user_id, name, type, color, opening_balance_cents) VALUES (?, ?, ?, ?, ?)',
-            [$uid, $name, $type, $color, $opening]
+            'INSERT INTO accounts (user_id, name, type, color, image, opening_balance_cents) VALUES (?, ?, ?, ?, ?, ?)',
+            [$uid, $name, $type, $color, $image, $opening]
         );
         return [
             'id' => $id,
             'name' => $name,
             'type' => $type,
             'color' => $color,
+            'image' => $image,
             'openingBalanceCents' => $opening,
             'balanceCents' => $opening,
             'txCount' => 0,
@@ -328,10 +331,11 @@ final class Repo
     }
 
     /** Type is immutable after creation (changing it would re-interpret history). */
-    public static function updateAccount(int $uid, int $id, mixed $name, mixed $color, mixed $openingBalanceCents): void
+    public static function updateAccount(int $uid, int $id, mixed $name, mixed $color, mixed $openingBalanceCents, mixed $image = null): void
     {
         $name = Validate::name($name);
         $color = Validate::color($color);
+        $image = Validate::accountImage($image);
         // Sign the opening balance using the account's existing (immutable) type.
         $existing = DB::one('SELECT type FROM accounts WHERE id = ? AND user_id = ?', [$id, $uid]);
         if ($existing === null) {
@@ -339,8 +343,8 @@ final class Repo
         }
         $opening = self::signedOpening((string)$existing['type'], $openingBalanceCents);
         DB::exec(
-            'UPDATE accounts SET name = ?, color = ?, opening_balance_cents = ? WHERE id = ? AND user_id = ?',
-            [$name, $color, $opening, $id, $uid]
+            'UPDATE accounts SET name = ?, color = ?, image = ?, opening_balance_cents = ? WHERE id = ? AND user_id = ?',
+            [$name, $color, $image, $opening, $id, $uid]
         );
     }
 

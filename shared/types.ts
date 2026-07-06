@@ -29,6 +29,10 @@ export interface Account {
   name: string;
   type: AccountType;
   color: string;
+  // Optional custom image as a data URI. When set, the UI shows it instead of
+  // the color; color is kept as the fallback (and identity color in compact
+  // lists like transactions/transfers).
+  image: string | null;
   openingBalanceCents: number;
   balanceCents: number;
   txCount: number;
@@ -147,11 +151,12 @@ export interface Api {
       name: string;
       type: AccountType;
       color: string;
+      image: string | null;
       openingBalanceCents: number;
     }): Promise<Account>;
     update(
       id: number,
-      data: { name: string; color: string; openingBalanceCents: number }
+      data: { name: string; color: string; image: string | null; openingBalanceCents: number }
     ): Promise<void>;
     remove(id: number): Promise<void>;
   };

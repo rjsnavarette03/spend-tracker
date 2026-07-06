@@ -164,7 +164,11 @@ export function Accounts({
                       <tr key={a.id}>
                         <td>
                           <span className="cat-chip">
-                            <span className="color-dot" style={{ background: a.color }} />
+                            {a.image ? (
+                              <img className="acct-avatar" src={a.image} alt="" />
+                            ) : (
+                              <span className="color-dot" style={{ background: a.color }} />
+                            )}
                             <span>{a.name}</span>
                           </span>
                         </td>

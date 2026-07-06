@@ -154,6 +154,16 @@ final class DB
                 : "ALTER TABLE users ADD COLUMN currency CHAR(3) NOT NULL DEFAULT 'USD'";
             self::tryDdl($col);
         }
+
+        // Step 4: accounts.image (added with the custom account image feature).
+        try {
+            self::$pdo->query('SELECT image FROM accounts LIMIT 1');
+        } catch (PDOException) {
+            $col = $driver === 'sqlite'
+                ? 'ALTER TABLE accounts ADD COLUMN image TEXT NULL'
+                : 'ALTER TABLE accounts ADD COLUMN image MEDIUMTEXT NULL';
+            self::tryDdl($col);
+        }
     }
 
     /**

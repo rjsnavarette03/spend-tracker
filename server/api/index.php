@@ -144,15 +144,16 @@ try {
             Http::json(Repo::listAccounts($uid));
         }
         if ($method === 'POST' && $sub === '') {
-            $b = Http::readJson();
+            // Larger body cap: accounts may carry an inline image data URI.
+            $b = Http::readJson(1024 * 1024);
             Http::json(
-                Repo::createAccount($uid, $b['name'] ?? null, $b['type'] ?? null, $b['color'] ?? null, $b['openingBalanceCents'] ?? 0),
+                Repo::createAccount($uid, $b['name'] ?? null, $b['type'] ?? null, $b['color'] ?? null, $b['openingBalanceCents'] ?? 0, $b['image'] ?? null),
                 201
             );
         }
         if ($method === 'PUT' && $sub !== '') {
-            $b = Http::readJson();
-            Repo::updateAccount($uid, Validate::intId($sub), $b['name'] ?? null, $b['color'] ?? null, $b['openingBalanceCents'] ?? 0);
+            $b = Http::readJson(1024 * 1024);
+            Repo::updateAccount($uid, Validate::intId($sub), $b['name'] ?? null, $b['color'] ?? null, $b['openingBalanceCents'] ?? 0, $b['image'] ?? null);
             Http::json(['ok' => true]);
         }
         if ($method === 'DELETE' && $sub !== '') {

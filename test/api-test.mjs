@@ -318,6 +318,37 @@ let bankId = 0;
   const badType = await a.call('POST', '/accounts', { name: 'X', type: 'cash', color: '#38bdf8', openingBalanceCents: 0 });
   check('invalid account type -> 422', badType.status === 422, `got ${badType.status}`);
 
+  // ---------- account custom image (color OR image) ----------
+  const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+  const imgAcct = await a.call('POST', '/accounts', {
+    name: 'Img Acct', type: 'debit', color: '#38bdf8', image: PNG, openingBalanceCents: 0,
+  });
+  check('create account with image', imgAcct.status === 201 && imgAcct.data.image === PNG, JSON.stringify(imgAcct.data).slice(0, 120));
+
+  const imgInList = (await a.call('GET', '/accounts')).data.find((x) => x.id === imgAcct.data.id);
+  check('account image round-trips in list', imgInList?.image === PNG);
+
+  // update can set an image on an existing account, then clear it back to null
+  await a.call('PUT', `/accounts/${bankId}`, { name: 'Test Bank', color: '#38bdf8', image: PNG, openingBalanceCents: 100000 });
+  let bankImg = (await a.call('GET', '/accounts')).data.find((x) => x.id === bankId);
+  check('account update can set image', bankImg?.image === PNG);
+  await a.call('PUT', `/accounts/${bankId}`, { name: 'Test Bank', color: '#38bdf8', image: null, openingBalanceCents: 100000 });
+  bankImg = (await a.call('GET', '/accounts')).data.find((x) => x.id === bankId);
+  check('account update can clear image', bankImg?.image === null, JSON.stringify(bankImg?.image));
+
+  const badImg = await a.call('POST', '/accounts', {
+    name: 'Bad Img', type: 'debit', color: '#38bdf8', image: 'https://example.com/x.png', openingBalanceCents: 0,
+  });
+  check('invalid account image -> 422', badImg.status === 422, `got ${badImg.status}`);
+
+  const hugeImg = await a.call('POST', '/accounts', {
+    name: 'Huge Img', type: 'debit', color: '#38bdf8', image: 'data:image/png;base64,' + 'A'.repeat(800001), openingBalanceCents: 0,
+  });
+  check('oversized account image -> 422', hugeImg.status === 422, `got ${hugeImg.status}`);
+
+  await a.call('DELETE', `/accounts/${imgAcct.data.id}`); // keep later counts predictable
+
   // tx tied to account: expense deducts, income adds
   const exp = await a.call('POST', '/transactions', {
     amountCents: 20000, type: 'expense', categoryId: seededGroceriesId, accountId: bankId,

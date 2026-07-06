@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     name TEXT NOT NULL,
     type TEXT NOT NULL CHECK (type IN ('debit','credit','loan')),
     color TEXT NOT NULL DEFAULT '#38bdf8',
+    image TEXT NULL,
     opening_balance_cents INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

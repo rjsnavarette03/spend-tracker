@@ -60,11 +60,16 @@ final class Http
         exit;
     }
 
-    /** @return array<string, mixed> */
-    public static function readJson(): array
+    /**
+     * @param int $maxBytes hard cap on the raw body size. Defaults to 64 KB;
+     *   routes that legitimately carry more (e.g. an inline account image)
+     *   pass a higher value.
+     * @return array<string, mixed>
+     */
+    public static function readJson(int $maxBytes = 65536): array
     {
         $raw = file_get_contents('php://input');
-        if ($raw === false || strlen($raw) > 64 * 1024) {
+        if ($raw === false || strlen($raw) > $maxBytes) {
             throw new ApiError('Invalid request body', 400);
         }
         $data = json_decode($raw === '' ? 'null' : $raw, true);

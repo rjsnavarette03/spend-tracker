@@ -289,7 +289,7 @@ export function Login({
         )}
 
         <div className="login-foot">
-          Your data is private to your account and stored on this server only.
+          Your data is private to your account only.
         </div>
       </div>
     </div>

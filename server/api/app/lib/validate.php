@@ -121,6 +121,37 @@ final class Validate
         return $t;
     }
 
+    /**
+     * Optional custom account image, stored inline as a base64 data URI.
+     * null / '' means "no image" (the account falls back to its color).
+     * We only accept image data URIs, cap the size, and confirm the base64
+     * actually decodes so a junk string can't be stored. The client already
+     * downscales to a small square, so this is a safety ceiling, not the
+     * expected size (~<100KB in practice).
+     */
+    public static function accountImage(mixed $v): ?string
+    {
+        if ($v === null || $v === '') {
+            return null;
+        }
+        if (!is_string($v)) {
+            throw new ApiError('Invalid image', 422);
+        }
+        // Byte length (data URIs are ASCII); keep below the accounts route's
+        // JSON body cap so the rest of the payload still fits.
+        if (strlen($v) > 800000) {
+            throw new ApiError('Image is too large', 422);
+        }
+        if (!preg_match('#^data:image/(?:png|jpe?g|webp|gif);base64,([A-Za-z0-9+/]+={0,2})$#', $v, $m)) {
+            throw new ApiError('Invalid image', 422);
+        }
+        $decoded = base64_decode($m[1], true);
+        if ($decoded === false || $decoded === '') {
+            throw new ApiError('Invalid image', 422);
+        }
+        return $v;
+    }
+
     /** Signed cents (opening balances may be negative = money owed). */
     public static function signedCents(mixed $v): int
     {

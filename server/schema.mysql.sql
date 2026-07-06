@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     name VARCHAR(60) NOT NULL,
     type ENUM('debit','credit','loan') NOT NULL,
     color CHAR(7) NOT NULL DEFAULT '#38bdf8',
+    image MEDIUMTEXT NULL,
     opening_balance_cents BIGINT NOT NULL DEFAULT 0,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
