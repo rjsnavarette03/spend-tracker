@@ -39,12 +39,14 @@ export function Dashboard({
   setPeriod,
   categories,
   accounts,
+  availableYears,
   onDataChanged,
 }: {
   period: Period;
   setPeriod: (p: Period) => void;
   categories: Category[];
   accounts: Account[];
+  availableYears: number[];
   onDataChanged: () => void;
 }) {
   const [data, setData] = useState<DashboardData | null>(null);
@@ -93,7 +95,7 @@ export function Dashboard({
           <div className="page-sub">{periodLabel(period)} overview</div>
         </div>
         <div className="head-actions">
-          <PeriodPicker value={period} onChange={setPeriod} />
+          <PeriodPicker value={period} onChange={setPeriod} availableYears={availableYears} />
           <button className="btn btn-primary" onClick={() => setShowAdd(true)}>
             <PlusIcon /> Add transaction
           </button>

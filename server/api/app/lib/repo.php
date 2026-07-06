@@ -698,4 +698,18 @@ final class Repo
             'totalCents' => (int)$r['totalCents'],
         ], $rows);
     }
+
+    /**
+     * Distinct calendar years (ascending) that have at least one transaction,
+     * so the UI can offer a year picker limited to years with actual activity.
+     * @return array<int, int>
+     */
+    public static function transactionYears(int $uid): array
+    {
+        $rows = DB::all(
+            'SELECT DISTINCT SUBSTR(date, 1, 4) AS y FROM transactions WHERE user_id = ? ORDER BY y',
+            [$uid]
+        );
+        return array_map(static fn(array $r): int => (int)$r['y'], $rows);
+    }
 }

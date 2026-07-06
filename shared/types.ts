@@ -188,5 +188,6 @@ export interface Api {
     summary(from: string, to: string): Promise<MonthlySummary>;
     trend(endMonth: string, count: number): Promise<MonthlySummary[]>;
     breakdown(from: string, to: string, type: TxType): Promise<BreakdownRow[]>;
+    years(): Promise<number[]>;
   };
 }

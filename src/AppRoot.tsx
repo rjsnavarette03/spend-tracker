@@ -10,6 +10,7 @@ import { Accounts } from './pages/Accounts';
 import { Budgets } from './pages/Budgets';
 import { Categories } from './pages/Categories';
 import { Dashboard } from './pages/Dashboard';
+import { LegalPage } from './pages/Legal';
 import { Transactions } from './pages/Transactions';
 
 type Phase = 'loading' | 'anon' | 'authed' | 'offline';
@@ -41,6 +42,7 @@ function DashboardPage() {
       setPeriod={c.setPeriod}
       categories={c.categories}
       accounts={c.accounts}
+      availableYears={c.availableYears}
       onDataChanged={c.onDataChanged}
     />
   );
@@ -53,6 +55,7 @@ function TransactionsPage() {
       setPeriod={c.setPeriod}
       categories={c.categories}
       accounts={c.accounts}
+      availableYears={c.availableYears}
       onDataChanged={c.onDataChanged}
     />
   );
@@ -145,6 +148,11 @@ export function AppRoot() {
       />
     );
   }
+
+  // Privacy Policy & Terms are public: reachable whether signed in, signed out,
+  // or still loading the session — so links work from anywhere.
+  if (location.pathname === '/privacy') return <LegalPage doc="privacy" />;
+  if (location.pathname === '/terms') return <LegalPage doc="terms" />;
 
   if (phase === 'loading') {
     return <div className="fullpage-center loading">Loading…</div>;

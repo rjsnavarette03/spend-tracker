@@ -25,6 +25,8 @@ export interface AppContext {
   setPeriod: (p: Period) => void;
   categories: Category[];
   accounts: Account[];
+  // Years that have transactions — drives the year picker (see PeriodPicker).
+  availableYears: number[];
   onDataChanged: () => void;
 }
 
@@ -44,6 +46,7 @@ export default function AppLayout({ user, onLogout }: { user: User; onLogout: ()
   const [period, setPeriod] = useState<Period>(() => currentPeriod('month'));
   const [categories, setCategories] = useState<Category[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [availableYears, setAvailableYears] = useState<number[]>([]);
   // Local copy so hasPassword/hasGoogle can refresh after account changes.
   const [account, setAccount] = useState<User>(user);
   const [showAccount, setShowAccount] = useState(false);
@@ -75,17 +78,29 @@ export default function AppLayout({ user, onLogout }: { user: User; onLogout: ()
     }
   }, []);
 
+  // Years with transactions change only when a tx lands in a new year, so this
+  // rides along with the other refreshes rather than getting its own trigger.
+  const refreshYears = useCallback(async () => {
+    try {
+      setAvailableYears(await api.reports.years());
+    } catch {
+      // non-fatal
+    }
+  }, []);
+
   useEffect(() => {
     void refreshCategories();
     void refreshAccounts();
-  }, [refreshCategories, refreshAccounts]);
+    void refreshYears();
+  }, [refreshCategories, refreshAccounts, refreshYears]);
 
   const onDataChanged = useCallback(() => {
     void refreshCategories();
     void refreshAccounts();
-  }, [refreshCategories, refreshAccounts]);
+    void refreshYears();
+  }, [refreshCategories, refreshAccounts, refreshYears]);
 
-  const ctx: AppContext = { period, setPeriod, categories, accounts, onDataChanged };
+  const ctx: AppContext = { period, setPeriod, categories, accounts, availableYears, onDataChanged };
 
   return (
     <div className="app">
@@ -121,6 +136,15 @@ export default function AppLayout({ user, onLogout }: { user: User; onLogout: ()
                 <LogoutIcon />
               </button>
             </div>
+          </div>
+          <div className="sidebar-legal">
+            <a href="/privacy" target="_blank" rel="noopener noreferrer">
+              Privacy
+            </a>
+            <span aria-hidden="true">·</span>
+            <a href="/terms" target="_blank" rel="noopener noreferrer">
+              Terms
+            </a>
           </div>
         </div>
       </aside>

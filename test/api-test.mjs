@@ -258,6 +258,11 @@ let txId = 0;
   check('transactions from/to matches month', rtx.data.length === mtx.data.length && rtx.data.length > 0, `${rtx.data.length} vs ${mtx.data.length}`);
   const rtxEmpty = await a.call('GET', `/transactions?from=1999-01-01&to=1999-12-31`);
   check('transactions from/to excludes out-of-range', rtxEmpty.data.length === 0);
+
+  // /reports/years: distinct years with transactions (data-driven, not a fixed
+  // window). All of A's activity so far is in 2026, so 2025 must be absent.
+  const yrs = await a.call('GET', '/reports/years');
+  check('reports/years is data-driven', Array.isArray(yrs.data) && yrs.data.includes(2026) && !yrs.data.includes(2025), JSON.stringify(yrs.data));
 }
 
 // ---------- budgets (recurring, per-category cadence) ----------

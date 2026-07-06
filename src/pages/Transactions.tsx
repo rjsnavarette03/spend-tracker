@@ -21,12 +21,14 @@ export function Transactions({
   setPeriod,
   categories,
   accounts,
+  availableYears,
   onDataChanged,
 }: {
   period: Period;
   setPeriod: (p: Period) => void;
   categories: Category[];
   accounts: Account[];
+  availableYears: number[];
   onDataChanged: () => void;
 }) {
   const [txs, setTxs] = useState<Transaction[]>([]);
@@ -121,7 +123,7 @@ export function Transactions({
       </div>
 
       <div className="toolbar">
-        <PeriodPicker value={period} onChange={setPeriod} />
+        <PeriodPicker value={period} onChange={setPeriod} availableYears={availableYears} />
         <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as TxType | 'all')}>
           <option value="all">All types</option>
           <option value="income">Income</option>

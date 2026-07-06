@@ -73,7 +73,7 @@ POST /transactions   (TxInput)          PUT/DELETE /transactions/:id
 GET  /budgets                           PUT /budgets { categoryId, cadence, amountCents }  (0 deletes)
      (budgets are recurring per-category rules; cadence = week|month|year)
 GET  /reports/summary?month             GET /reports/trend?endMonth&count
-GET  /reports/breakdown?month&type
+GET  /reports/breakdown?month&type      GET /reports/years → [YYYY,…] (years with tx)
 ```
 
 ### Security model

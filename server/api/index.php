@@ -232,6 +232,9 @@ try {
         if ($sub === 'breakdown') {
             Http::json(Repo::breakdown($uid, $from, $to, $_GET['type'] ?? null));
         }
+        if ($sub === 'years') {
+            Http::json(Repo::transactionYears($uid));
+        }
         throw new ApiError('Not found', 404);
     }
 

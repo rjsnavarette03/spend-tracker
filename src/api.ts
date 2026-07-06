@@ -178,5 +178,6 @@ export const api: Api = {
       http('GET', `/reports/trend${qs({ endMonth, count })}`),
     breakdown: (from: string, to: string, type: TxType) =>
       http('GET', `/reports/breakdown${qs({ from, to, type })}`),
+    years: () => http('GET', '/reports/years'),
   },
 };

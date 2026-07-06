@@ -282,6 +282,20 @@ export function Login({
               <button type="submit" className="btn btn-primary btn-block" disabled={busy}>
                 {busy ? 'Please wait…' : mode === 'signin' ? 'Sign in' : 'Create account'}
               </button>
+
+              {mode === 'register' && (
+                <p className="login-agree">
+                  By creating an account, you agree to our{' '}
+                  <a href="/terms" target="_blank" rel="noopener noreferrer">
+                    Terms of Use
+                  </a>{' '}
+                  and{' '}
+                  <a href="/privacy" target="_blank" rel="noopener noreferrer">
+                    Privacy Policy
+                  </a>
+                  .
+                </p>
+              )}
             </form>
 
             {googleClientId && (
@@ -296,7 +310,16 @@ export function Login({
         )}
 
         <div className="login-foot">
-          Your data is private to your account only.
+          <div>Your data is private to your account only.</div>
+          <div className="login-foot-links">
+            <a href="/privacy" target="_blank" rel="noopener noreferrer">
+              Privacy Policy
+            </a>
+            <span aria-hidden="true">·</span>
+            <a href="/terms" target="_blank" rel="noopener noreferrer">
+              Terms of Use
+            </a>
+          </div>
         </div>
       </div>
     </div>
