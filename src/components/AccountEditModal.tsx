@@ -117,9 +117,11 @@ export function AccountEditModal({
         </div>
 
         <div className="field">
-          <label>Type{initial ? ' (fixed after creation)' : ''}</label>
+          <label>Type</label>
           <div className="segmented">
-            {(Object.keys(TYPE_LABELS) as AccountType[]).map((t) => (
+            {/* Type is immutable once set, so when editing show only the
+                account's own type; when creating, offer all three. */}
+            {(initial ? [type] : (Object.keys(TYPE_LABELS) as AccountType[])).map((t) => (
               <button
                 key={t}
                 type="button"
@@ -140,8 +142,8 @@ export function AccountEditModal({
             {type === 'debit'
               ? "The account's current balance."
               : type === 'credit'
-                ? 'How much you currently owe on this card — recorded as a negative balance automatically.'
-                : 'How much you currently owe / borrowed — recorded as a negative balance automatically.'}
+                ? 'How much you currently owe on this card'
+                : 'How much you currently owe / borrowed'}
           </div>
         </div>
 
