@@ -175,3 +175,37 @@ export const ChevronRightIcon = ({ size }: IconProps) => (
     <polyline points="9 18 15 12 9 6" />
   </svg>
 );
+
+export const CalendarIcon = ({ size }: IconProps) => (
+  <svg {...base(size)}>
+    <rect x="3" y="4" width="18" height="18" rx="2" />
+    <line x1="16" y1="2" x2="16" y2="6" />
+    <line x1="8" y1="2" x2="8" y2="6" />
+    <line x1="3" y1="10" x2="21" y2="10" />
+  </svg>
+);
+
+export const ChartIcon = ({ size }: IconProps) => (
+  <svg {...base(size)}>
+    <line x1="3" y1="21" x2="21" y2="21" />
+    <line x1="7" y1="21" x2="7" y2="13" />
+    <line x1="12" y1="21" x2="12" y2="7" />
+    <line x1="17" y1="21" x2="17" y2="16" />
+  </svg>
+);
+
+export const CoinsIcon = ({ size }: IconProps) => (
+  <svg {...base(size)}>
+    <circle cx="8" cy="8" r="6" />
+    <path d="M18.09 10.37A6 6 0 1 1 10.34 18" />
+    <path d="M7 6h1v4" />
+    <path d="m16.71 13.88.7.71-2.82 2.82" />
+  </svg>
+);
+
+export const ShieldIcon = ({ size }: IconProps) => (
+  <svg {...base(size)}>
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
+    <path d="m9 12 2 2 4-4" />
+  </svg>
+);

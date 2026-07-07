@@ -35,7 +35,7 @@ export function useAppContext(): AppContext {
 }
 
 const NAV: Array<{ to: string; label: string; icon: JSX.Element }> = [
-  { to: '/', label: 'Dashboard', icon: <DashboardIcon /> },
+  { to: '/dashboard', label: 'Dashboard', icon: <DashboardIcon /> },
   { to: '/transactions', label: 'Transactions', icon: <ListIcon /> },
   { to: '/accounts', label: 'Accounts', icon: <BankIcon /> },
   { to: '/budgets', label: 'Budgets', icon: <TargetIcon /> },

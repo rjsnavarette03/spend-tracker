@@ -111,6 +111,21 @@ export const api: Api = {
       syncCurrency(r.user);
       return r;
     },
+    verify: async (code) => {
+      const r = await http<AuthResponse>('POST', '/auth/verify', { code });
+      setCsrf(r.csrf);
+      syncCurrency(r.user);
+      return r;
+    },
+    verifyLink: async (token) => {
+      const r = await http<AuthResponse>('POST', '/auth/verify-link', { token });
+      setCsrf(r.csrf);
+      syncCurrency(r.user);
+      return r;
+    },
+    resendVerification: async () => {
+      await http<{ ok: boolean }>('POST', '/auth/resend-verification');
+    },
     changePassword: async (currentPassword, newPassword) => {
       await http<{ ok: boolean }>('POST', '/auth/change-password', { currentPassword, newPassword });
     },

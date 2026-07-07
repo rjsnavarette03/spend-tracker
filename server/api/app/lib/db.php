@@ -69,8 +69,8 @@ final class DB
      * Auto-migrate on first use. Idempotent and self-healing — safe to run on
      * every connection, under concurrency, and after a partially-applied
      * upgrade (see tryDdl).
-     *   1. If the newest table (`transfers`) is missing, replay the full
-     *      dialect schema (all CREATE ... IF NOT EXISTS — data preserved).
+     *   1. If the newest table (`email_verifications`) is missing, replay the
+     *      full dialect schema (all CREATE ... IF NOT EXISTS — data preserved).
      *   2. Add columns that CREATE IF NOT EXISTS can't express — currently
      *      transactions.account_id, driven off the artifact that is created
      *      last (the FK on MySQL) so an interrupted upgrade re-completes.
@@ -80,14 +80,15 @@ final class DB
         assert(self::$pdo !== null);
         $driver = (string)self::$pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
 
-        // Step 1: create any missing tables.
-        $hasTransfers = true;
+        // Step 1: create any missing tables. Probe the newest table
+        // (email_verifications); if it's absent, replay the whole schema.
+        $hasNewest = true;
         try {
-            self::$pdo->query('SELECT 1 FROM transfers LIMIT 1');
+            self::$pdo->query('SELECT 1 FROM email_verifications LIMIT 1');
         } catch (PDOException) {
-            $hasTransfers = false;
+            $hasNewest = false;
         }
-        if (!$hasTransfers) {
+        if (!$hasNewest) {
             $file = __DIR__ . '/../schema.' . ($driver === 'sqlite' ? 'sqlite' : 'mysql') . '.sql';
             $sql = file_get_contents($file);
             if ($sql === false) {
@@ -171,6 +172,19 @@ final class DB
         // category with a cadence (week/month/year). Migrate by collapsing each
         // category's rows to its most recent month's amount, cadence 'month'.
         self::migrateBudgetsToCadence($driver);
+
+        // Step 6: users.email_verified (email verification on registration).
+        // Added with DEFAULT 1 so every account that predates this feature is
+        // grandfathered as verified and never locked out; the register() path
+        // explicitly inserts 0 to force new email/password signups through
+        // verification. (The email_verifications table itself is created by the
+        // step-1 replay, which the probe above triggers when it's missing.)
+        if (!self::columnExists('users', 'email_verified')) {
+            $col = $driver === 'sqlite'
+                ? 'ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 1'
+                : 'ALTER TABLE users ADD COLUMN email_verified TINYINT(1) NOT NULL DEFAULT 1';
+            self::tryDdl($col);
+        }
     }
 
     /** True if `SELECT $col FROM $table` works (i.e. the column exists). */

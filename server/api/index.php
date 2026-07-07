@@ -41,7 +41,11 @@ try {
 
     // Pre-auth mutations carry no CSRF token, so they get a strict origin
     // check instead; all other mutations require the CSRF token.
-    $preAuth = $resource === 'auth' && in_array($sub, ['login', 'register', 'google', 'forgot', 'reset'], true);
+    // verify-link carries a token from the email (not a CSRF token) and may be
+    // opened on a device with no session, so it's pre-auth (strict origin) like
+    // reset. The code-entry `verify` and `resend-verification` are authenticated
+    // (the user is signed in but unverified) and keep the normal CSRF check.
+    $preAuth = $resource === 'auth' && in_array($sub, ['login', 'register', 'google', 'forgot', 'reset', 'verify-link'], true);
     Http::originCheck($method, $preAuth);
     if (!in_array($method, ['GET', 'HEAD', 'OPTIONS'], true) && !$preAuth) {
         Http::csrfCheck();
@@ -99,6 +103,22 @@ try {
             $user = Auth::resetPassword($b['token'] ?? null, $b['password'] ?? null);
             Http::json(['user' => $user, 'csrf' => $_SESSION['csrf']]);
         }
+        if ($method === 'POST' && $sub === 'verify') {
+            $me = Auth::requireUser(); // signed in (but unverified) + CSRF-checked above
+            $b = Http::readJson();
+            $user = Auth::verifyEmailCode($me, $b['code'] ?? null);
+            Http::json(['user' => $user, 'csrf' => $_SESSION['csrf']]);
+        }
+        if ($method === 'POST' && $sub === 'verify-link') {
+            $b = Http::readJson();
+            $user = Auth::verifyEmailToken($b['token'] ?? null); // signs the user in
+            Http::json(['user' => $user, 'csrf' => $_SESSION['csrf']]);
+        }
+        if ($method === 'POST' && $sub === 'resend-verification') {
+            $me = Auth::requireUser(); // signed in (but unverified) + CSRF-checked above
+            Auth::resendEmailVerification($me);
+            Http::json(['ok' => true]);
+        }
         if ($method === 'POST' && $sub === 'change-password') {
             $me = Auth::requireUser(); // authenticated + CSRF-checked above
             $b = Http::readJson();
@@ -114,8 +134,10 @@ try {
         throw new ApiError('Not found', 404);
     }
 
-    // Everything below requires a signed-in user.
-    $uid = Auth::requireUser();
+    // Everything below requires a signed-in, email-verified user. (Unverified
+    // accounts can still reach the /auth/* routes above — verify, resend,
+    // logout, change-password — but no data.)
+    $uid = Auth::requireVerifiedUser();
 
     // ---------- categories ----------
     if ($resource === 'categories') {

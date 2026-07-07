@@ -21,10 +21,16 @@ return [
     // Leave empty ('') to hide the Google sign-in button.
     'google_client_id' => '',
 
-    // "From" address for password-reset emails. For best deliverability this
-    // should be a real mailbox on your domain (hPanel -> Emails). If omitted,
-    // it defaults to noreply@<your-domain>.
+    // "From" address for account emails (email verification codes/links and
+    // password-reset links). For best deliverability this should be a real
+    // mailbox on your domain (hPanel -> Emails). If omitted, it defaults to
+    // noreply@<your-domain>.
     'mail_from' => 'noreply@budgettracker.rjsnavarette.com',
+
+    // Local/testing only: write outgoing emails to this file instead of sending
+    // them (so verification codes and reset links are readable offline / by the
+    // test suite). Leave unset/absent in production.
+    // 'mail_log_file' => __DIR__ . '/maillog.txt',
 
     // Session cookie name (no need to change).
     'session_name' => 'spendtracker_sid',

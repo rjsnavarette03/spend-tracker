@@ -10,6 +10,10 @@ export interface User {
   hasPassword: boolean;
   hasGoogle: boolean;
   currency: string; // ISO 4217 code, e.g. 'USD', 'PHP'
+  // False until the user confirms their email (via 6-digit code or backup
+  // link). Data endpoints are blocked and the app shows the verify screen
+  // until this is true. Google accounts and pre-existing accounts are verified.
+  emailVerified: boolean;
 }
 
 export interface Category {
@@ -144,6 +148,12 @@ export interface Api {
     logout(): Promise<void>;
     forgot(email: string): Promise<void>;
     reset(token: string, password: string): Promise<AuthResponse>;
+    // Email verification: `verify` submits the 6-digit code (signed-in user),
+    // `verifyLink` redeems the emailed backup token (may be signed out — signs
+    // the user in), `resendVerification` re-issues the code/link.
+    verify(code: string): Promise<AuthResponse>;
+    verifyLink(token: string): Promise<AuthResponse>;
+    resendVerification(): Promise<void>;
     changePassword(currentPassword: string, newPassword: string): Promise<void>;
     setCurrency(currency: string): Promise<string>;
   };

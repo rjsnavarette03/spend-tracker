@@ -7,6 +7,9 @@ CREATE TABLE IF NOT EXISTS users (
     google_sub TEXT NULL UNIQUE,
     name TEXT NOT NULL DEFAULT '',
     currency TEXT NOT NULL DEFAULT 'USD',
+    -- DEFAULT 1 grandfathers existing/Google accounts as verified; register()
+    -- inserts 0 to force new email/password signups through verification.
+    email_verified INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -98,4 +101,17 @@ CREATE TABLE IF NOT EXISTS password_resets (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets(user_id)
+CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets(user_id);
+
+-- Pending email verifications: one active row per user (UNIQUE user_id), holding
+-- a hashed 6-digit code and a hashed backup link token. Newest table, so
+-- DB::ensureSchema probes it to decide whether to replay the schema.
+CREATE TABLE IF NOT EXISTS email_verifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    code_hash TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    expires_at INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)

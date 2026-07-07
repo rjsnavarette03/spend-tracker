@@ -8,6 +8,11 @@ CREATE TABLE IF NOT EXISTS users (
     google_sub VARCHAR(64) NULL,
     name VARCHAR(100) NOT NULL DEFAULT '',
     currency CHAR(3) NOT NULL DEFAULT 'USD',
+    -- Email verification. DEFAULT 1 so every pre-existing account (and every
+    -- Google account, whose email Google already verified) is treated as
+    -- verified; only the email/password register() path inserts 0 to force a
+    -- new signup through the verification flow.
+    email_verified TINYINT(1) NOT NULL DEFAULT 1,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     UNIQUE KEY uniq_users_email (email),
@@ -110,4 +115,22 @@ CREATE TABLE IF NOT EXISTS password_resets (
     UNIQUE KEY uniq_password_resets_token (token_hash),
     KEY idx_password_resets_user (user_id),
     CONSTRAINT fk_password_resets_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Pending email verifications: one active row per user (UNIQUE user_id), holding
+-- a hashed 6-digit code (typed in the app) and a hashed backup link token
+-- (one-click verify). `attempts` caps wrong-code guesses. This is the newest
+-- table, so DB::ensureSchema probes it to decide whether to replay the schema.
+CREATE TABLE IF NOT EXISTS email_verifications (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    user_id INT UNSIGNED NOT NULL,
+    code_hash CHAR(64) NOT NULL,
+    token_hash CHAR(64) NOT NULL,
+    attempts INT NOT NULL DEFAULT 0,
+    expires_at INT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uniq_email_verifications_user (user_id),
+    UNIQUE KEY uniq_email_verifications_token (token_hash),
+    CONSTRAINT fk_email_verifications_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci

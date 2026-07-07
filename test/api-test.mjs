@@ -6,20 +6,61 @@
 import { readFileSync } from 'node:fs';
 
 const BASE = process.env.API_BASE ?? 'http://127.0.0.1:8124';
-// When set (local dev/tests), the server writes reset emails to this file so
-// the reset-token flow can be tested offline. Unset on the live run.
+// The server writes emails to this file instead of sending them (config
+// `mail_log_file`). The suite reads verification codes/tokens and reset tokens
+// from it, so it is REQUIRED — registration now emails a verification code that
+// every data-touching test must consume before the account is unlocked.
 const MAIL_LOG = process.env.MAIL_LOG;
+if (!MAIL_LOG) {
+  console.error(
+    'MAIL_LOG must be set (config `mail_log_file`): the suite reads email verification codes from it.'
+  );
+  process.exit(1);
+}
+
+/** All mail-log blocks addressed to `email`, newest first. */
+function mailBlocks(email) {
+  return readFileSync(MAIL_LOG, 'utf8')
+    .split('----')
+    .filter((b) => b.includes(`TO: ${email}`))
+    .reverse();
+}
 
 /** Extract the most recent reset token emailed to `email` from the mail log. */
 function latestResetToken(email) {
-  const blocks = readFileSync(MAIL_LOG, 'utf8').split('----');
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    if (blocks[i].includes(`TO: ${email}`)) {
-      const m = blocks[i].match(/reset=([a-f0-9]{64})/);
+  for (const b of mailBlocks(email)) {
+    const m = b.match(/reset=([a-f0-9]{64})/);
+    if (m) return m[1];
+  }
+  return null;
+}
+
+/** Most recent 6-digit verification code emailed to `email`. */
+function latestVerificationCode(email) {
+  for (const b of mailBlocks(email)) {
+    if (/verification code/i.test(b)) {
+      const m = b.match(/code is:\s+(\d{6})/);
       if (m) return m[1];
     }
   }
   return null;
+}
+
+/** Most recent verification backup-link token emailed to `email`. */
+function latestVerificationToken(email) {
+  for (const b of mailBlocks(email)) {
+    const m = b.match(/verify=([a-f0-9]{64})/);
+    if (m) return m[1];
+  }
+  return null;
+}
+
+/** Consume the emailed code to verify a freshly-registered client's email. */
+async function verifyClient(client, email) {
+  const code = latestVerificationCode(email);
+  const r = await client.call('POST', '/auth/verify', { code });
+  if (r.data?.csrf) client.csrf = r.data.csrf;
+  return r;
 }
 
 let passed = 0;
@@ -139,6 +180,7 @@ const b = new Client();
 
   const r = await a.call('POST', '/auth/register', { email: emailA, password, name: 'Alice' });
   check('register succeeds', r.status === 200 && r.data.user?.email === emailA, JSON.stringify(r.data));
+  check('newly-registered user is unverified', r.data.user?.emailVerified === false, JSON.stringify(r.data.user));
   a.csrf = r.data.csrf;
 
   const dup = await a.call('POST', '/auth/register', { email: emailA, password, name: '' });
@@ -146,6 +188,119 @@ const b = new Client();
 
   const me = await a.call('GET', '/auth/me');
   check('me returns the user', me.status === 200 && me.data.user?.email === emailA);
+
+  // Data is locked until Alice verifies; then it opens up. (Fuller verify
+  // behavior — wrong code, resend, backup link — is exercised in its own
+  // section below with throwaway users.)
+  const preVerify = await a.call('GET', '/categories');
+  check('unverified user blocked from data -> 403', preVerify.status === 403, `got ${preVerify.status}`);
+  const av = await verifyClient(a, emailA);
+  check('verify with emailed code succeeds', av.status === 200 && av.data.user?.emailVerified === true, JSON.stringify(av.data));
+}
+
+// ---------- email verification: code flow (wrong code, resend, idempotent) ----------
+{
+  const v = new Client();
+  await v.call('GET', '/auth/me').then((r) => (v.csrf = r.data.csrf));
+  const email = `verify.${suffix}@test.local`;
+  const reg = await v.call('POST', '/auth/register', { email, password, name: 'Vera' });
+  v.csrf = reg.data.csrf;
+  check('verify-user registers unverified', reg.status === 200 && reg.data.user?.emailVerified === false, JSON.stringify(reg.data.user));
+
+  const meUnv = await v.call('GET', '/auth/me');
+  check('me reports emailVerified false', meUnv.data.user?.emailVerified === false);
+
+  const blocked = await v.call('GET', '/transactions');
+  check('unverified blocked from data -> 403', blocked.status === 403, `got ${blocked.status}`);
+
+  const wrong = await v.call('POST', '/auth/verify', { code: '000000' });
+  check('wrong code -> 422 (incorrect)', wrong.status === 422, `got ${wrong.status}`);
+  const stillBlocked = await v.call('GET', '/transactions');
+  check('still blocked after wrong code -> 403', stillBlocked.status === 403);
+
+  const malformed = await v.call('POST', '/auth/verify', { code: '12' });
+  check('malformed code -> 422', malformed.status === 422, `got ${malformed.status}`);
+
+  // Resend issues a fresh code (invalidating the previous one).
+  const resend = await v.call('POST', '/auth/resend-verification');
+  check('resend verification -> ok', resend.status === 200, `got ${resend.status}`);
+
+  const code = latestVerificationCode(email);
+  check('verification code emailed', typeof code === 'string' && /^\d{6}$/.test(code), String(code));
+
+  const ok = await v.call('POST', '/auth/verify', { code });
+  check('verify with correct code succeeds', ok.status === 200 && ok.data.user?.emailVerified === true, JSON.stringify(ok.data));
+
+  const cats = await v.call('GET', '/categories');
+  check('verified user can access data', cats.status === 200 && Array.isArray(cats.data));
+
+  const again = await v.call('POST', '/auth/verify', { code });
+  check('verify when already verified -> ok (idempotent)', again.status === 200 && again.data.user?.emailVerified === true, `got ${again.status}`);
+}
+
+// ---------- email verification: wrong-code attempts cap (burn -> resend) ----------
+{
+  const v = new Client();
+  await v.call('GET', '/auth/me').then((r) => (v.csrf = r.data.csrf));
+  const email = `vcap.${suffix}@test.local`;
+  const reg = await v.call('POST', '/auth/register', { email, password, name: 'Capps' });
+  v.csrf = reg.data.csrf;
+  check('cap-user registers unverified', reg.status === 200 && reg.data.user?.emailVerified === false);
+
+  // Hammer wrong (well-formed) guesses. Each returns 422 and increments the
+  // counter; once the cap is hit the pending code is burned and further guesses
+  // return 429. (Guard the loop so a broken cap can't spin forever.)
+  let capStatus = 0;
+  for (let i = 0; i < 12; i++) {
+    const r = await v.call('POST', '/auth/verify', { code: '000000' });
+    if (r.status === 429) { capStatus = 429; break; }
+    check(`wrong guess #${i + 1} -> 422`, r.status === 422, `got ${r.status}`);
+  }
+  check('code burned after too many wrong guesses -> 429', capStatus === 429);
+
+  // The originally-emailed (correct) code no longer works — the row was burned.
+  const burnedCode = latestVerificationCode(email);
+  const afterBurn = await v.call('POST', '/auth/verify', { code: burnedCode });
+  check('originally-correct code rejected after burn -> 400', afterBurn.status === 400, `got ${afterBurn.status}`);
+  const stillBlocked = await v.call('GET', '/categories');
+  check('still blocked after burn -> 403', stillBlocked.status === 403, `got ${stillBlocked.status}`);
+
+  // A resend issues a fresh working code (recovery path after a burn).
+  await v.call('POST', '/auth/resend-verification');
+  const fresh = latestVerificationCode(email);
+  check('resent code is a fresh 6-digit code', typeof fresh === 'string' && /^\d{6}$/.test(fresh), String(fresh));
+  const ok = await v.call('POST', '/auth/verify', { code: fresh });
+  check('fresh code verifies after a burn', ok.status === 200 && ok.data.user?.emailVerified === true, JSON.stringify(ok.data));
+}
+
+// ---------- email verification: backup link token ----------
+{
+  const v = new Client();
+  await v.call('GET', '/auth/me').then((r) => (v.csrf = r.data.csrf));
+  const email = `verlink.${suffix}@test.local`;
+  const reg = await v.call('POST', '/auth/register', { email, password, name: 'Linus' });
+  v.csrf = reg.data.csrf;
+  check('link-verify user registers unverified', reg.status === 200 && reg.data.user?.emailVerified === false);
+
+  const token = latestVerificationToken(email);
+  check('verification link token emailed', typeof token === 'string' && token.length === 64, String(token));
+
+  const bogus = await v.call('POST', '/auth/verify-link', { token: 'f'.repeat(64) });
+  check('bogus verify-link token -> 400', bogus.status === 400, `got ${bogus.status}`);
+
+  // verify-link works from a fresh session (link opened on another device) and
+  // signs the user in.
+  const fresh = new Client();
+  await fresh.call('GET', '/auth/me').then((r) => (fresh.csrf = r.data.csrf));
+  const done = await fresh.call('POST', '/auth/verify-link', { token });
+  check('verify-link verifies + signs in', done.status === 200 && done.data.user?.email === email && done.data.user?.emailVerified === true, JSON.stringify(done.data));
+  fresh.csrf = done.data.csrf;
+
+  const reuse = await fresh.call('POST', '/auth/verify-link', { token });
+  check('verify-link token is single-use -> 400', reuse.status === 400, `got ${reuse.status}`);
+
+  const cats = await fresh.call('GET', '/categories');
+  check('link-verified session can access data', cats.status === 200);
 }
 
 // ---------- categories ----------
@@ -492,6 +647,8 @@ let bankId = 0;
   const reg = await b.call('POST', '/auth/register', { email: emailB, password, name: 'Bob' });
   b.csrf = reg.data.csrf;
   check('user B registers', reg.status === 200);
+  const bv = await verifyClient(b, emailB);
+  check('user B verifies email', bv.status === 200 && bv.data.user?.emailVerified === true, JSON.stringify(bv.data));
 
   const bTxs = await b.call('GET', `/transactions?month=${MONTH}`);
   check('B sees no transactions of A', bTxs.data.length === 0);

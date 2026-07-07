@@ -5,11 +5,13 @@ import { api, AUTH_EXPIRED_EVENT } from './api';
 import AppLayout, { useAppContext } from './App';
 import { Login } from './auth/Login';
 import { ResetPassword } from './auth/ResetPassword';
+import { VerifyEmail } from './auth/VerifyEmail';
 import { AccountDetail } from './pages/AccountDetail';
 import { Accounts } from './pages/Accounts';
 import { Budgets } from './pages/Budgets';
 import { Categories } from './pages/Categories';
 import { Dashboard } from './pages/Dashboard';
+import { Landing } from './pages/Landing';
 import { LegalPage } from './pages/Legal';
 import { Transactions } from './pages/Transactions';
 
@@ -27,9 +29,24 @@ function clearResetParam(): void {
   window.history.replaceState({}, '', url.pathname + url.search + url.hash);
 }
 
+// The backup verification link (?verify=<token>) the server emails on register.
+// Like the reset link, it short-circuits routing so it always works.
+function readVerifyToken(): string | null {
+  const t = new URLSearchParams(window.location.search).get('verify');
+  return t && /^[a-f0-9]{64}$/.test(t) ? t : null;
+}
+function clearVerifyParam(): void {
+  const url = new URL(window.location.href);
+  url.searchParams.delete('verify');
+  window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+}
+
 // Only allow an internal, single-slash path as a post-login redirect target.
+// The landing ("/") is a marketing page, not a useful post-login destination,
+// so it (and anything invalid) falls back to the dashboard.
 function safeNext(raw: string | null): string {
-  return raw && raw.startsWith('/') && !raw.startsWith('//') ? raw : '/';
+  const p = raw && raw.startsWith('/') && !raw.startsWith('//') ? raw : '/dashboard';
+  return p === '/' ? '/dashboard' : p;
 }
 
 // Page route elements: pull the shared data from the layout's Outlet context
@@ -77,6 +94,7 @@ export function AppRoot() {
   const [user, setUser] = useState<User | null>(null);
   const [googleClientId, setGoogleClientId] = useState('');
   const [resetToken, setResetToken] = useState<string | null>(readResetToken);
+  const [verifyToken, setVerifyToken] = useState<string | null>(readVerifyToken);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -97,8 +115,15 @@ export function AppRoot() {
   }, []);
 
   useEffect(() => {
+    // The reset and verify-link flows establish their own session (both call
+    // session_regenerate_id server-side). Running the initial /auth/me
+    // concurrently races that: its pre-regeneration response can resolve after
+    // the token flow has signed the user in and clobber the state back to anon,
+    // bouncing the user to /login. Skip it while a token is in play; clearing
+    // the token re-runs this effect and loads the (now valid) session.
+    if (resetToken || verifyToken) return;
     void check();
-  }, [check]);
+  }, [check, resetToken, verifyToken]);
 
   useEffect(() => {
     const onExpired = () => {
@@ -125,7 +150,15 @@ export function AppRoot() {
     }
     setUser(null);
     setPhase('anon');
-    navigate('/login', { replace: true });
+    navigate('/', { replace: true }); // back to the public landing after sign-out
+  };
+
+  // Email just got verified (via code or backup link): adopt the now-verified
+  // user and drop them into the app.
+  const onVerified = (u: User) => {
+    setUser(u);
+    setPhase('authed');
+    navigate('/dashboard', { replace: true });
   };
 
   // Reset flow short-circuits everything else until it's finished/cancelled.
@@ -149,10 +182,38 @@ export function AppRoot() {
     );
   }
 
+  // Backup verification link (?verify=<token>): redeem it, then drop the
+  // (now signed-in, verified) user into the app. Priority like the reset flow.
+  if (verifyToken) {
+    const finish = () => {
+      clearVerifyParam();
+      setVerifyToken(null);
+    };
+    return (
+      <VerifyEmail
+        mode="link"
+        token={verifyToken}
+        onDone={(u) => {
+          finish();
+          onVerified(u);
+        }}
+        onCancel={() => {
+          finish();
+          navigate('/login', { replace: true });
+        }}
+      />
+    );
+  }
+
   // Privacy Policy & Terms are public: reachable whether signed in, signed out,
   // or still loading the session — so links work from anywhere.
   if (location.pathname === '/privacy') return <LegalPage doc="privacy" />;
   if (location.pathname === '/terms') return <LegalPage doc="terms" />;
+
+  // The root path is the public marketing landing for everyone (the app itself
+  // lives at /dashboard). Rendered even while the session is loading so it
+  // paints instantly; the CTA reflects auth state once known.
+  if (location.pathname === '/') return <Landing authed={phase === 'authed'} />;
 
   if (phase === 'loading') {
     return <div className="fullpage-center loading">Loading…</div>;
@@ -170,11 +231,17 @@ export function AppRoot() {
     );
   }
 
+  // Signed in but email not yet verified: no app access until they confirm.
+  // The verify screen replaces every app route (the URL is cosmetic here).
+  if (phase === 'authed' && user && !user.emailVerified) {
+    return <VerifyEmail mode="code" email={user.email} onDone={onVerified} onSignOut={onLogout} />;
+  }
+
   if (phase === 'authed' && user) {
     return (
       <Routes>
         <Route element={<AppLayout user={user} onLogout={onLogout} />}>
-          <Route index element={<DashboardPage />} />
+          <Route path="dashboard" element={<DashboardPage />} />
           <Route path="transactions" element={<TransactionsPage />} />
           <Route path="accounts" element={<AccountsPage />} />
           <Route path="accounts/:id" element={<AccountDetail />} />
@@ -182,7 +249,7 @@ export function AppRoot() {
           <Route path="categories" element={<CategoriesPage />} />
         </Route>
         {/* Signed in: auth screens or unknown paths fall back to the dashboard. */}
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     );
   }

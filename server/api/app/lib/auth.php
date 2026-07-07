@@ -3,11 +3,34 @@ declare(strict_types=1);
 
 final class Auth
 {
+    /** How long an emailed verification code / backup link stays valid. */
+    private const VERIFY_TTL = 1800; // 30 minutes
+    /** Wrong-code guesses allowed before a code is burned (resend required). */
+    private const MAX_CODE_ATTEMPTS = 6;
+
     public static function requireUser(): int
     {
         $uid = $_SESSION['uid'] ?? null;
         if (!is_int($uid) || $uid <= 0) {
             throw new ApiError('Not signed in', 401);
+        }
+        return $uid;
+    }
+
+    /**
+     * Like requireUser(), but also refuses users whose email isn't verified.
+     * Gates every data endpoint so an unverified account can sign in (to reach
+     * the verify screen) but can't read or write any data. The email_verified
+     * column is read fresh each call so verifying in another tab/device takes
+     * effect immediately; the array_key_exists guard keeps users usable during
+     * the brief window before the column migrates in.
+     */
+    public static function requireVerifiedUser(): int
+    {
+        $uid = self::requireUser();
+        $u = DB::one('SELECT email_verified FROM users WHERE id = ?', [$uid]);
+        if ($u !== null && array_key_exists('email_verified', $u) && (int)$u['email_verified'] !== 1) {
+            throw new ApiError('Please verify your email address to continue.', 403);
         }
         return $uid;
     }
@@ -19,7 +42,7 @@ final class Auth
         if (!is_int($uid) || $uid <= 0) {
             return null;
         }
-        $u = DB::one('SELECT id, email, name, password_hash, google_sub, currency FROM users WHERE id = ?', [$uid]);
+        $u = DB::one('SELECT id, email, name, password_hash, google_sub, currency, email_verified FROM users WHERE id = ?', [$uid]);
         if ($u === null) {
             unset($_SESSION['uid']);
             return null;
@@ -41,6 +64,9 @@ final class Auth
             'hasGoogle' => $u['google_sub'] !== null,
             // Fallback covers the brief window before the currency column migrates.
             'currency' => strtoupper((string)($u['currency'] ?? 'USD')) ?: 'USD',
+            // Fallback true (verified) if the column hasn't migrated in yet, so
+            // nobody is locked out mid-deploy.
+            'emailVerified' => !array_key_exists('email_verified', $u) || (int)$u['email_verified'] === 1,
         ];
     }
 
@@ -78,8 +104,11 @@ final class Auth
         }
 
         $hash = password_hash($password, PASSWORD_DEFAULT);
-        $uid = DB::insert('INSERT INTO users (email, password_hash, name) VALUES (?, ?, ?)', [$email, $hash, $name]);
+        // email_verified = 0: new email/password accounts must verify. (The
+        // column DEFAULTs to 1, so this explicit 0 is what gates them.)
+        $uid = DB::insert('INSERT INTO users (email, password_hash, name, email_verified) VALUES (?, ?, ?, 0)', [$email, $hash, $name]);
         Repo::seedDefaultCategories($uid);
+        self::issueEmailVerification($uid, $email);
         self::establishSession($uid);
         $user = self::currentUser();
         assert($user !== null);
@@ -133,7 +162,8 @@ final class Auth
             $byEmail = DB::one('SELECT * FROM users WHERE email = ?', [$email]);
             if ($byEmail !== null) {
                 // Same verified email — link Google to the existing account.
-                DB::exec('UPDATE users SET google_sub = ? WHERE id = ?', [$sub, (int)$byEmail['id']]);
+                // Google has confirmed the address, so mark it verified too.
+                DB::exec('UPDATE users SET google_sub = ?, email_verified = 1 WHERE id = ?', [$sub, (int)$byEmail['id']]);
                 $u = DB::one('SELECT * FROM users WHERE id = ?', [(int)$byEmail['id']]);
             } else {
                 $uid = DB::insert(
@@ -296,15 +326,147 @@ final class Auth
 
         $uid = (int)$row['user_id'];
         $pwHash = password_hash($newPassword, PASSWORD_DEFAULT);
-        DB::exec('UPDATE users SET password_hash = ? WHERE id = ?', [$pwHash, $uid]);
+        // Completing a reset proves control of the mailbox, so also mark the
+        // email verified and clear any pending verification for this user.
+        DB::exec('UPDATE users SET password_hash = ?, email_verified = 1 WHERE id = ?', [$pwHash, $uid]);
         DB::exec('DELETE FROM password_resets WHERE user_id = ?', [$uid]);
+        DB::exec('DELETE FROM email_verifications WHERE user_id = ?', [$uid]);
 
-        $u = DB::one('SELECT id, email, name, password_hash, google_sub, currency FROM users WHERE id = ?', [$uid]);
+        $u = DB::one('SELECT id, email, name, password_hash, google_sub, currency, email_verified FROM users WHERE id = ?', [$uid]);
         assert($u !== null);
         // A successful reset proves control of the mailbox — clear login locks.
         Http::throttleClear('login_acct:' . (string)$u['email']);
         self::establishSession($uid);
         return self::publicUser($u);
+    }
+
+    /**
+     * Create (or replace) the pending email verification for a user and email
+     * them both a 6-digit code (typed into the app) and a one-click backup
+     * link. Only hashes are stored; the plaintext exists only in the email.
+     */
+    private static function issueEmailVerification(int $uid, string $email): void
+    {
+        DB::exec('DELETE FROM email_verifications WHERE user_id = ?', [$uid]);
+        $code = str_pad((string)random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+        $token = bin2hex(random_bytes(32));
+        $expires = time() + self::VERIFY_TTL;
+        DB::exec(
+            'INSERT INTO email_verifications (user_id, code_hash, token_hash, attempts, expires_at) VALUES (?, ?, ?, 0, ?)',
+            [$uid, hash('sha256', $code), hash('sha256', $token), $expires]
+        );
+
+        $link = Mailer::appBaseUrl() . '/?verify=' . $token;
+        $mins = (int)round(self::VERIFY_TTL / 60);
+        $body = "Hello,\n\n"
+            . "Welcome to SpendTracker! Confirm your email address to finish setting up your account.\n\n"
+            . "Your verification code is:\n\n"
+            . "    " . $code . "\n\n"
+            . "Enter this code in the app to verify your account. It expires in {$mins} minutes.\n\n"
+            . "Prefer one click? You can also verify by opening this link (it signs you in and "
+            . "expires in {$mins} minutes):\n\n"
+            . $link . "\n\n"
+            . "If you didn't create a SpendTracker account, you can safely ignore this email.\n\n"
+            . "For your security, never share this code with anyone — SpendTracker staff will never "
+            . "ask for it.\n\n"
+            . "— SpendTracker";
+        Mailer::send($email, 'Verify your SpendTracker email', $body);
+    }
+
+    /**
+     * Verify the signed-in user's email with the 6-digit code. Idempotent if
+     * already verified. Wrong guesses are counted and the code is burned after
+     * MAX_CODE_ATTEMPTS (a resend issues a fresh one).
+     *
+     * @return array<string, mixed> the public user, now emailVerified
+     */
+    public static function verifyEmailCode(int $uid, mixed $code): array
+    {
+        Http::throttle('verify:' . $uid, 20, 900);
+        Http::throttle('verify_ip:' . Http::clientIp(), 60, 900);
+
+        $u = DB::one('SELECT id, email, name, password_hash, google_sub, currency, email_verified FROM users WHERE id = ?', [$uid]);
+        if ($u === null) {
+            throw new ApiError('Not signed in', 401);
+        }
+        if ((int)$u['email_verified'] === 1) {
+            return self::publicUser($u); // already verified — no-op
+        }
+
+        $code = is_string($code) ? trim($code) : (is_int($code) ? (string)$code : '');
+        if (!preg_match('/^\d{6}$/', $code)) {
+            throw new ApiError('Enter the 6-digit code from your email', 422);
+        }
+
+        $row = DB::one('SELECT id, code_hash, attempts, expires_at FROM email_verifications WHERE user_id = ?', [$uid]);
+        if ($row === null || (int)$row['expires_at'] < time()) {
+            if ($row !== null) {
+                DB::exec('DELETE FROM email_verifications WHERE id = ?', [(int)$row['id']]);
+            }
+            throw new ApiError('Your code has expired. Request a new one.', 400);
+        }
+        if ((int)$row['attempts'] >= self::MAX_CODE_ATTEMPTS) {
+            DB::exec('DELETE FROM email_verifications WHERE id = ?', [(int)$row['id']]);
+            throw new ApiError('Too many incorrect attempts. Request a new code.', 429);
+        }
+        if (!hash_equals((string)$row['code_hash'], hash('sha256', $code))) {
+            DB::exec('UPDATE email_verifications SET attempts = attempts + 1 WHERE id = ?', [(int)$row['id']]);
+            throw new ApiError('Incorrect code. Please check and try again.', 422);
+        }
+
+        DB::exec('UPDATE users SET email_verified = 1 WHERE id = ?', [$uid]);
+        DB::exec('DELETE FROM email_verifications WHERE user_id = ?', [$uid]);
+        $u['email_verified'] = 1;
+        return self::publicUser($u);
+    }
+
+    /**
+     * Verify via the one-time backup link token from the email. Works with no
+     * prior session (the link may be opened on another device); on success the
+     * user is signed in, mirroring the reset flow.
+     *
+     * @return array<string, mixed>
+     */
+    public static function verifyEmailToken(mixed $token): array
+    {
+        Http::throttle('verifylink:' . Http::clientIp(), 30, 900);
+        $token = is_string($token) ? $token : '';
+        if (!preg_match('/^[a-f0-9]{64}$/', $token)) {
+            throw new ApiError('Invalid or expired verification link', 400);
+        }
+
+        $hash = hash('sha256', $token);
+        $row = DB::one('SELECT id, user_id, expires_at FROM email_verifications WHERE token_hash = ?', [$hash]);
+        if ($row === null || (int)$row['expires_at'] < time()) {
+            if ($row !== null) {
+                DB::exec('DELETE FROM email_verifications WHERE id = ?', [(int)$row['id']]);
+            }
+            throw new ApiError('This verification link has expired. Please sign in and request a new one.', 400);
+        }
+
+        $uid = (int)$row['user_id'];
+        DB::exec('UPDATE users SET email_verified = 1 WHERE id = ?', [$uid]);
+        DB::exec('DELETE FROM email_verifications WHERE user_id = ?', [$uid]);
+        $u = DB::one('SELECT id, email, name, password_hash, google_sub, currency, email_verified FROM users WHERE id = ?', [$uid]);
+        assert($u !== null);
+        self::establishSession($uid);
+        return self::publicUser($u);
+    }
+
+    /** Re-issue and re-email a verification code/link for the signed-in user. */
+    public static function resendEmailVerification(int $uid): void
+    {
+        Http::throttle('resend:' . $uid, 5, 900);
+        Http::throttle('resend_ip:' . Http::clientIp(), 15, 900);
+
+        $u = DB::one('SELECT id, email, email_verified FROM users WHERE id = ?', [$uid]);
+        if ($u === null) {
+            throw new ApiError('Not signed in', 401);
+        }
+        if ((int)$u['email_verified'] === 1) {
+            return; // already verified — nothing to send
+        }
+        self::issueEmailVerification($uid, (string)$u['email']);
     }
 
     public static function logout(): void

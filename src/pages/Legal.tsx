@@ -45,7 +45,7 @@ export function LegalPage({ doc }: { doc: 'privacy' | 'terms' }) {
         <span aria-hidden="true">·</span>
         <Link to="/terms">Terms of Use</Link>
         <span aria-hidden="true">·</span>
-        <Link to="/">Back to app</Link>
+        <Link to="/">Home</Link>
       </footer>
     </div>
   );
