@@ -306,6 +306,7 @@ export function Accounts({
       {accountModal.open && (
         <AccountEditModal
           initial={accountModal.editing}
+          accounts={accounts}
           onClose={() => setAccountModal({ open: false, editing: null })}
           onSaved={afterMutation}
         />

@@ -1,7 +1,7 @@
 import { FormEvent, useMemo, useState } from 'react';
 import type { Account, Category, Transaction, TxType } from '../../shared/types';
 import { api } from '../api';
-import { centsToInput, cleanError, parseAmountToCents, todayStr } from '../format';
+import { centsToInput, cleanError, fmtMoney, parseAmountToCents, todayStr } from '../format';
 import { Modal } from './Modal';
 import { MoneyInput } from './MoneyInput';
 
@@ -168,7 +168,7 @@ export function TransactionModal({
                 <optgroup label="Debit">
                   {debitAccounts.map((a) => (
                     <option key={a.id} value={a.id}>
-                      {a.name}
+                      {a.name} ({fmtMoney(a.balanceCents)})
                     </option>
                   ))}
                 </optgroup>
@@ -177,14 +177,16 @@ export function TransactionModal({
                 <optgroup label="Credit">
                   {creditAccounts.map((a) => (
                     <option key={a.id} value={a.id}>
-                      {a.name}
+                      {a.name} ({fmtMoney(a.balanceCents)})
                     </option>
                   ))}
                 </optgroup>
               )}
               {preservedAccount && (
                 <optgroup label="Other">
-                  <option value={preservedAccount.id}>{preservedAccount.name}</option>
+                  <option value={preservedAccount.id}>
+                    {preservedAccount.name} ({fmtMoney(preservedAccount.balanceCents)})
+                  </option>
                 </optgroup>
               )}
             </select>

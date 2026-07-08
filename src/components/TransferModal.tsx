@@ -1,7 +1,7 @@
 import { FormEvent, useState } from 'react';
 import type { Account, Transfer } from '../../shared/types';
 import { api } from '../api';
-import { centsToInput, cleanError, parseAmountToCents, todayStr } from '../format';
+import { centsToInput, cleanError, fmtMoney, parseAmountToCents, todayStr } from '../format';
 import { Modal } from './Modal';
 import { MoneyInput } from './MoneyInput';
 
@@ -101,7 +101,7 @@ export function TransferModal({
               <option value="">Choose account…</option>
               {optionsFor(fromId).map((a) => (
                 <option key={a.id} value={a.id} disabled={String(a.id) === toId}>
-                  {a.name}
+                  {a.name} ({fmtMoney(a.balanceCents)})
                 </option>
               ))}
             </select>
@@ -112,7 +112,7 @@ export function TransferModal({
               <option value="">Choose account…</option>
               {optionsFor(toId).map((a) => (
                 <option key={a.id} value={a.id} disabled={String(a.id) === fromId}>
-                  {a.name}
+                  {a.name} ({fmtMoney(a.balanceCents)})
                 </option>
               ))}
             </select>

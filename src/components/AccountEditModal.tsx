@@ -1,7 +1,14 @@
 import { ChangeEvent, FormEvent, useRef, useState } from 'react';
 import type { Account, AccountType } from '../../shared/types';
 import { api } from '../api';
-import { centsToInput, cleanError, parseSignedAmountToCents } from '../format';
+import {
+  centsToInput,
+  cleanError,
+  fmtMoney,
+  parseAmountToCents,
+  parseSignedAmountToCents,
+  todayStr,
+} from '../format';
 import { fileToAccountImage } from '../image';
 import { Modal } from './Modal';
 import { MoneyInput } from './MoneyInput';
@@ -19,10 +26,13 @@ const TYPE_LABELS: Record<AccountType, string> = {
 
 export function AccountEditModal({
   initial,
+  accounts = [],
   onClose,
   onSaved,
 }: {
   initial: Account | null;
+  // Existing accounts — offered as the payout destination for a new loan.
+  accounts?: Account[];
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -38,9 +48,17 @@ export function AccountEditModal({
   const [opening, setOpening] = useState(
     initial ? centsToInput(Math.abs(initial.openingBalanceCents)) : ''
   );
+  // New-loan extras: optionally deposit the borrowed amount into a debit
+  // account, with an optional transaction fee. Total owed = amount + fee;
+  // only the amount reaches the destination (the fee never does).
+  const [destId, setDestId] = useState('');
+  const [fee, setFee] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const isNewLoan = !initial && type === 'loan';
+  const debitAccounts = accounts.filter((a) => a.type === 'debit');
 
   const onPickFile = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -69,6 +87,20 @@ export function AccountEditModal({
       setError('Enter a valid amount, e.g. 1500');
       return;
     }
+    let feeCents = 0;
+    if (isNewLoan && fee.trim() !== '') {
+      const parsedFee = parseAmountToCents(fee);
+      if (parsedFee === null) {
+        setError('Enter a valid transaction fee, or leave it empty');
+        return;
+      }
+      feeCents = parsedFee;
+    }
+    const loanAmount = Math.abs(openingCents);
+    if (isNewLoan && destId && loanAmount === 0) {
+      setError('Enter the loan amount to deposit');
+      return;
+    }
     if (mode === 'image' && !image) {
       setError('Upload an image, or switch to Color');
       return;
@@ -83,13 +115,43 @@ export function AccountEditModal({
           image: imageToSave,
           openingBalanceCents: openingCents,
         });
+      } else if (isNewLoan && destId) {
+        // Loan paid out to an account: the debt is recorded by the transfer
+        // (opening 0) — the loan ends up owing amount + fee while the
+        // destination gains only the amount (standard transfer fee math).
+        const created = await api.accounts.create({
+          name: name.trim(),
+          type,
+          color,
+          image: imageToSave,
+          openingBalanceCents: 0,
+        });
+        try {
+          await api.transfers.create({
+            fromAccountId: created.id,
+            toAccountId: Number(destId),
+            amountCents: loanAmount,
+            feeCents,
+            date: todayStr(),
+            note: 'Loan received',
+          });
+        } catch (err) {
+          onSaved(); // the account exists — refresh lists before surfacing this
+          setError(
+            `Account created, but the deposit failed: ${cleanError(err)}. ` +
+              'You can add the transfer manually from the Accounts page.'
+          );
+          setSaving(false);
+          return;
+        }
       } else {
         await api.accounts.create({
           name: name.trim(),
           type,
           color,
           image: imageToSave,
-          openingBalanceCents: openingCents,
+          // A fee on an untracked payout still counts toward the debt.
+          openingBalanceCents: isNewLoan ? loanAmount + feeCents : openingCents,
         });
       }
       onSaved();
@@ -146,6 +208,38 @@ export function AccountEditModal({
                 : 'How much you currently owe / borrowed'}
           </div>
         </div>
+
+        {isNewLoan && (
+          <>
+            <div className="field">
+              <label htmlFor="acc-loan-dest">Deposit to account (optional)</label>
+              <select
+                id="acc-loan-dest"
+                value={destId}
+                onChange={(e) => setDestId(e.target.value)}
+              >
+                <option value="">No account — just track what you owe</option>
+                {debitAccounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} ({fmtMoney(a.balanceCents)})
+                  </option>
+                ))}
+              </select>
+              <div className="field-hint">
+                Where the borrowed money lands. Only the loan amount is deposited — the fee never
+                reaches it.
+              </div>
+            </div>
+
+            <div className="field">
+              <label htmlFor="acc-loan-fee">Transaction fee (optional)</label>
+              <MoneyInput id="acc-loan-fee" value={fee} onChange={setFee} placeholder="0.00" />
+              <div className="field-hint">
+                Added to your debt: total owed = loan amount + fee.
+              </div>
+            </div>
+          </>
+        )}
 
         <div className="field">
           <label>Appearance</label>
