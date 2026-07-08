@@ -193,7 +193,8 @@ export function Dashboard({
               </button>
             </div>
           ) : (
-            <table className="table">
+            /* recent-table: ≤860px CSS restacks rows (note hidden — glance list) */
+            <table className="table recent-table">
               <tbody>
                 {recent.map((t) => (
                   <tr key={t.id}>

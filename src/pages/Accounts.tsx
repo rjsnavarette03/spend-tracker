@@ -165,9 +165,11 @@ export function Accounts({
             const subtotal = items.reduce((s, a) => s + a.balanceCents, 0);
             return (
               <div className="panel" key={type}>
-                <div className="section-title">
+                {/* Stacked: title + subtotal share the top line, hint drops below. */}
+                <div className="section-title section-title-stacked">
                   <span>
-                    {title} <span className="section-hint">{hint}</span>
+                    {title}
+                    <span className="section-hint">{hint}</span>
                   </span>
                   <span className={`num ${subtotal < 0 ? 'amount-expense' : ''}`}>
                     {fmtMoney(subtotal)}
@@ -236,7 +238,8 @@ export function Accounts({
             balances update automatically.
           </div>
         ) : (
-          <table className="table">
+          /* transfers-cards: ≤860px CSS restacks each row into a list card */
+          <table className="table transfers-cards">
             <thead>
               <tr>
                 <th>Date</th>
@@ -269,7 +272,11 @@ export function Accounts({
                   </td>
                   <td className="note-cell">{t.note}</td>
                   <td className="num">{fmtMoney(t.amountCents)}</td>
-                  <td className="num" style={{ color: t.feeCents > 0 ? 'var(--red)' : 'var(--text-faint)' }}>
+                  {/* fee-none: the mobile card layout hides the fee line entirely */}
+                  <td
+                    className={`num ${t.feeCents === 0 ? 'fee-none' : ''}`}
+                    style={{ color: t.feeCents > 0 ? 'var(--red)' : 'var(--text-faint)' }}
+                  >
                     {t.feeCents > 0 ? fmtMoney(t.feeCents) : '—'}
                   </td>
                   <td className="actions">

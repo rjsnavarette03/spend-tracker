@@ -179,7 +179,8 @@ export function AccountDetail() {
         ) : txs.length === 0 ? (
           <div className="empty-state">No transactions linked to this account yet.</div>
         ) : (
-          <table className="table">
+          /* tx-cards: ≤860px CSS restacks each row into a native-app list card */
+          <table className="table tx-cards">
             <thead>
               <tr>
                 <th>Date</th>
@@ -237,7 +238,8 @@ export function AccountDetail() {
         ) : transfers.length === 0 ? (
           <div className="empty-state">No transfers or payments involving this account yet.</div>
         ) : (
-          <table className="table">
+          /* detail-transfers: ≤860px CSS restacks rows into list cards */
+          <table className="table detail-transfers">
             <thead>
               <tr>
                 <th>Date</th>

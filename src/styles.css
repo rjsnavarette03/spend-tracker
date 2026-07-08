@@ -195,6 +195,20 @@ body {
   padding: 26px 32px 40px;
 }
 
+/* Mobile app chrome — top bar + bottom tab bar. Hidden on desktop (the
+   sidebar covers both roles there); the ≤860px block swaps them in. */
+.mobile-topbar,
+.tabbar {
+  display: none;
+}
+
+/* Snappier taps: no double-tap-zoom delay or grey flash on controls. */
+button,
+a {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
 .page-head {
   display: flex;
   align-items: center;
@@ -734,6 +748,13 @@ select {
   opacity: 1;
 }
 
+/* Touch devices have no hover — row actions must stay visible. */
+@media (hover: none) {
+  .table .actions .btn-icon {
+    opacity: 1;
+  }
+}
+
 .amount-income {
   color: var(--green);
 }
@@ -1182,6 +1203,16 @@ select {
   font-weight: 700;
 }
 
+/* Accounts sections: subtotal aligns with the title line, hint drops below. */
+.section-title-stacked {
+  align-items: flex-start;
+}
+
+.section-title-stacked .section-hint {
+  display: block;
+  margin: 2px 0 0;
+}
+
 .type-tag {
   font-size: 11px;
   font-weight: 700;
@@ -1348,55 +1379,200 @@ select {
 /* ---------- responsive (web) ---------- */
 
 @media (max-width: 860px) {
+  /* ----- app shell: native-app chrome (top bar + bottom tabs) ----- */
+
   .app {
-    flex-direction: column;
+    display: block; /* body scrolls; sticky/fixed chrome hangs off it */
     height: auto;
     min-height: 100vh;
+    min-height: 100dvh;
   }
 
   .sidebar {
-    width: 100%;
-    flex-direction: row;
+    display: none; /* desktop-only; mobile uses .mobile-topbar + .tabbar */
+  }
+
+  .mobile-topbar {
+    display: flex;
     align-items: center;
-    padding: 8px 12px;
-    border-right: none;
-    border-bottom: 1px solid var(--border);
+    justify-content: space-between;
+    gap: 10px;
     position: sticky;
     top: 0;
-    z-index: 20;
+    z-index: 30; /* above page content, below modals (50) */
+    padding: 8px 12px;
+    padding-top: max(8px, env(safe-area-inset-top));
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
   }
 
-  .logo {
-    padding: 0 10px 0 0;
-    font-size: 14px;
+  .mobile-topbar .logo {
+    padding: 0;
+    font-size: 15px;
   }
 
-  .nav {
-    flex-direction: row;
+  .mobile-topbar-actions {
+    display: flex;
+    align-items: center;
     gap: 2px;
+  }
+
+  .mobile-topbar-actions .btn-icon {
+    width: 44px;
+    height: 44px;
+  }
+
+  .tabbar {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding: 6px max(10px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom))
+      max(10px, env(safe-area-inset-left));
+    box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.22);
+  }
+
+  .tab-item {
     flex: 1;
-    overflow-x: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    min-height: 50px;
+    padding: 5px 2px;
+    border-radius: var(--radius-sm);
+    color: var(--text-dim);
+    text-decoration: none;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.1px;
+    transition: color 0.12s, background 0.12s;
   }
 
-  .nav-item {
-    padding: 8px 10px;
+  .tab-item svg {
+    width: 22px;
+    height: 22px;
   }
 
-  .nav-item .nav-label {
-    display: none;
+  .tab-item:active {
+    background: var(--surface-2);
   }
 
-  .sidebar-foot {
-    margin-top: 0;
-    padding: 0 0 0 8px;
+  .tab-item.active {
+    color: #a5b4fc;
   }
 
-  .user-email {
-    display: none;
-  }
-
+  /* Content scrolls under the sticky header; keep clear of the fixed tabs. */
   .main {
-    padding: 18px 14px 40px;
+    overflow: visible;
+    padding: 16px 14px calc(78px + env(safe-area-inset-bottom));
+  }
+
+  /* ----- touch ergonomics ----- */
+
+  /* 16px stops iOS focus-zoom; taller controls are easier to tap. */
+  input:not([type='checkbox']):not([type='radio']),
+  textarea,
+  select {
+    font-size: 16px;
+    min-height: 44px;
+  }
+
+  .btn {
+    min-height: 44px;
+  }
+
+  .btn-icon {
+    width: 40px;
+    height: 40px;
+  }
+
+  .table .actions .btn-icon {
+    opacity: 1; /* no hover on touch — keep row actions visible */
+  }
+
+  .table .actions {
+    width: 92px;
+  }
+
+  /* ----- page layout ----- */
+
+  .page-head {
+    margin-bottom: 14px;
+  }
+
+  /* Head buttons share the row full-width, app-toolbar style. */
+  .head-actions {
+    width: 100%;
+  }
+
+  .head-actions .btn {
+    flex: 1;
+    justify-content: center;
+  }
+
+  /* Wide tables scroll inside their panel — never the page. */
+  .panel {
+    overflow-x: auto;
+    padding: 14px;
+  }
+
+  /* Period picker becomes a full-width two-row control. */
+  .period-picker {
+    width: 100%;
+    gap: 8px;
+  }
+
+  .gran-segmented {
+    display: flex;
+    width: 100%;
+  }
+
+  .gran-segmented button {
+    flex: 1;
+    padding: 10px 4px;
+  }
+
+  .period-nav {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .period-label-wrap {
+    flex: 1;
+    justify-content: center;
+  }
+
+  .period-year {
+    flex: 1;
+  }
+
+  .toolbar {
+    gap: 8px;
+  }
+
+  .toolbar select {
+    flex: 1 1 40%;
+    min-width: 0;
+  }
+
+  .toolbar input[type='search'] {
+    flex: 1 1 100%;
+    width: auto;
+  }
+
+  .stat-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .stat-card {
+    padding: 12px 14px;
   }
 
   .stat-value {
@@ -1407,9 +1583,360 @@ select {
     flex-direction: column;
   }
 
-  .toolbar input[type="search"] {
+  .totals-bar {
+    flex-wrap: wrap;
+    gap: 8px 18px;
+  }
+
+  /* Tighter table cells; chips capped so rows fit narrow panels. */
+  .table th,
+  .table td {
+    padding: 9px 8px;
+  }
+
+  .cat-chip {
+    max-width: 128px;
+  }
+
+  /* "owed" drops under the number so balances stay narrow. */
+  .owed-tag {
+    display: block;
+  }
+
+  /* Row actions: compact (secondary targets) so amounts get the room. */
+  .table .actions {
+    padding-left: 0;
+    padding-right: 0;
+    width: auto;
+  }
+
+  .table .actions .btn-icon {
+    width: 32px;
+    height: 32px;
+  }
+
+  /* ----- card-style row restacks (native list feel) ----- */
+
+  /* Transactions (+ account-detail transactions): the 5-column row
+     (date / category / note / amount / actions) becomes a stacked card:
+     chips + amount, then date + actions, then the note line. */
+  .tx-cards thead {
+    display: none;
+  }
+
+  .tx-cards tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 2px 10px;
+    padding: 9px 2px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .tx-cards tbody td {
+    display: block;
+    border-bottom: none;
+    padding: 0;
+    min-width: 0;
+  }
+
+  .tx-cards td:nth-child(1) {
+    grid-row: 2;
+    grid-column: 1;
+    align-self: center;
+    color: var(--text-dim);
+    font-size: 12px;
+  }
+
+  .tx-cards td:nth-child(2) {
+    grid-row: 1;
+    grid-column: 1;
+  }
+
+  .tx-cards td:nth-child(3) {
+    grid-row: 3;
+    grid-column: 1 / -1;
+    max-width: none;
+    font-size: 12.5px;
+  }
+
+  .tx-cards td:nth-child(3):empty {
+    display: none;
+  }
+
+  .tx-cards td:nth-child(4) {
+    grid-row: 1;
+    grid-column: 2;
+    align-self: center;
+  }
+
+  .tx-cards td:nth-child(5) {
+    grid-row: 2;
+    grid-column: 2;
+  }
+
+  /* Account-detail transfers (date / details / amount / actions). */
+  .detail-transfers thead {
+    display: none;
+  }
+
+  .detail-transfers tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 2px 10px;
+    padding: 9px 2px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .detail-transfers tbody td {
+    display: block;
+    border-bottom: none;
+    padding: 0;
+    min-width: 0;
+  }
+
+  .detail-transfers td:nth-child(1) {
+    grid-row: 2;
+    grid-column: 1;
+    align-self: center;
+    color: var(--text-dim);
+    font-size: 12px;
+  }
+
+  .detail-transfers td:nth-child(2) {
+    grid-row: 1;
+    grid-column: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .detail-transfers td:nth-child(3) {
+    grid-row: 1;
+    grid-column: 2;
+    align-self: center;
+  }
+
+  .detail-transfers td:nth-child(4) {
+    grid-row: 2;
+    grid-column: 2;
+  }
+
+  /* Accounts-page transfers (date / from→to / note / amount / fee / actions):
+     line 1 = date far-left + amount far-right (space-between, matched sizes),
+     then From→To, Fee (hidden when none), Note (hidden when empty), actions.
+     Flex-wrap + `order`: width:100% cells force their own line; the date's
+     flex:1 pushes the amount to the right edge; hidden lines collapse. */
+  .transfers-cards thead {
+    display: none;
+  }
+
+  .transfers-cards tbody tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 0;
+    padding: 12px 2px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .transfers-cards tbody td {
+    display: block;
+    border-bottom: none;
+    padding: 0;
+    min-width: 0;
+    text-align: left;
+  }
+
+  /* line 1: date (left) + amount (right), visually balanced sizes */
+  .transfers-cards td:nth-child(1) {
+    order: 1;
+    flex: 1;
+    color: var(--text-dim);
+    font-size: 13px;
+  }
+
+  .transfers-cards td:nth-child(4) {
+    order: 2;
+    font-size: 13px;
+    text-align: right;
+  }
+
+  .transfers-cards td:nth-child(2) {
+    order: 3;
     width: 100%;
   }
+
+  .transfers-cards td:nth-child(5) {
+    order: 4;
+    width: 100%;
+    font-size: 12.5px;
+    text-align: left; /* outweigh .table .num's right alignment */
+  }
+
+  .transfers-cards td:nth-child(5)::before {
+    content: 'Fee ';
+    color: var(--text-dim);
+    font-weight: 500;
+  }
+
+  .transfers-cards td:nth-child(5).fee-none {
+    display: none;
+  }
+
+  .transfers-cards td:nth-child(3) {
+    order: 5;
+    width: 100%;
+    max-width: none;
+    font-size: 12.5px;
+  }
+
+  .transfers-cards td:nth-child(3):empty {
+    display: none;
+  }
+
+  .transfers-cards td:nth-child(6) {
+    order: 6;
+    width: 100%;
+    text-align: left; /* outweigh .table .actions' right alignment */
+  }
+
+  /* Dashboard recents (date / category / note / amount): glance list —
+     chip + amount on one line, date under; the note is dropped. */
+  .recent-table tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 2px 10px;
+    padding: 8px 2px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .recent-table tbody td {
+    display: block;
+    border-bottom: none;
+    padding: 0;
+    min-width: 0;
+  }
+
+  .recent-table td:nth-child(1) {
+    grid-row: 2;
+    grid-column: 1;
+    font-size: 12px;
+  }
+
+  .recent-table td:nth-child(2) {
+    grid-row: 1;
+    grid-column: 1;
+  }
+
+  .recent-table td:nth-child(3) {
+    display: none;
+  }
+
+  .recent-table td:nth-child(4) {
+    grid-row: 1 / span 2;
+    grid-column: 2;
+    align-self: center;
+  }
+
+  /* Budgets: each category becomes an editable card — chip on top,
+     cadence + amount inputs side by side, labelled spent/left, full-width bar. */
+  .budgets-table thead {
+    display: none;
+  }
+
+  .budgets-table tbody tr {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 10px;
+    padding: 12px 4px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .budgets-table tbody td {
+    display: block;
+    border-bottom: none;
+    padding: 0;
+    min-width: 0;
+  }
+
+  .budgets-table td:nth-child(1) {
+    grid-column: 1 / -1;
+  }
+
+  .budgets-table td:nth-child(2) {
+    grid-column: 1;
+  }
+
+  .budgets-table td:nth-child(2) select {
+    width: 100%;
+  }
+
+  .budgets-table td:nth-child(3) {
+    grid-column: 2;
+  }
+
+  .budgets-table td:nth-child(3) .money-input {
+    width: 100%;
+  }
+
+  .budgets-table td:nth-child(4),
+  .budgets-table td:nth-child(5) {
+    text-align: left;
+    font-size: 12.5px;
+  }
+
+  .budgets-table td:nth-child(4)::before {
+    content: 'Spent ';
+    color: var(--text-dim);
+    font-weight: 500;
+  }
+
+  .budgets-table td:nth-child(5)::before {
+    content: 'Left ';
+    color: var(--text-dim);
+    font-weight: 500;
+  }
+
+  .budgets-table td:nth-child(6) {
+    grid-column: 1 / -1;
+  }
+
+  /* Toasts sit above the tab bar, full-width like app banners. */
+  .toast-container {
+    left: 14px;
+    right: 14px;
+    bottom: calc(72px + env(safe-area-inset-bottom));
+  }
+
+  /* Modals become bottom sheets (native-app feel). */
+  .modal-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .modal {
+    width: 100%;
+    max-width: 100%;
+    border-radius: 16px 16px 0 0;
+    max-height: calc(100dvh - 48px);
+    padding-bottom: env(safe-area-inset-bottom);
+    animation: sheetUp 0.18s ease-out;
+  }
+}
+
+@keyframes sheetUp {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+}
+
+[data-theme='light'] .tab-item.active {
+  color: #4338ca;
+}
+
+[data-theme='light'] .tabbar {
+  box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.08);
 }
 
 

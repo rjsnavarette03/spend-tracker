@@ -160,7 +160,8 @@ export function Transactions({
         </div>
       ) : (
         <div className="panel table-panel">
-          <table className="table">
+          {/* tx-cards: ≤860px CSS restacks each row into a native-app list card */}
+          <table className="table tx-cards">
             <thead>
               <tr>
                 <th>Date</th>

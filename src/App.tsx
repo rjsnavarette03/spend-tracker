@@ -104,6 +104,36 @@ export default function AppLayout({ user, onLogout }: { user: User; onLogout: ()
 
   return (
     <div className="app">
+      {/* Mobile-only top bar: brand + account actions (hidden on desktop). The
+          nav itself lives in the bottom .tabbar on mobile, like a native app. */}
+      <header className="mobile-topbar">
+        <div className="logo">
+          <span className="logo-badge">
+            <WalletIcon size={17} />
+          </span>
+          SpendTracker
+        </div>
+        <div className="mobile-topbar-actions">
+          <ThemeToggle />
+          <button
+            className="btn-icon"
+            onClick={() => setShowAccount(true)}
+            title="Account settings"
+            aria-label="Account settings"
+          >
+            <SettingsIcon />
+          </button>
+          <button
+            className="btn-icon logout-btn"
+            onClick={onLogout}
+            title="Sign out"
+            aria-label="Sign out"
+          >
+            <LogoutIcon />
+          </button>
+        </div>
+      </header>
+
       <aside className="sidebar">
         <div className="logo">
           <span className="logo-badge">
@@ -151,6 +181,20 @@ export default function AppLayout({ user, onLogout }: { user: User; onLogout: ()
       <main className="main">
         <Outlet context={ctx} />
       </main>
+
+      {/* Mobile-only bottom tab bar (hidden on desktop). */}
+      <nav className="tabbar" aria-label="Primary">
+        {NAV.map((item) => (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            className={({ isActive }) => `tab-item ${isActive ? 'active' : ''}`}
+          >
+            {item.icon}
+            <span className="tab-label">{item.label}</span>
+          </NavLink>
+        ))}
+      </nav>
 
       {showAccount && (
         <AccountModal

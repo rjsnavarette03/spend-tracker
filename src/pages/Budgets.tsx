@@ -141,7 +141,8 @@ export function Budgets() {
         </div>
       ) : (
         <div className="panel" style={{ padding: '6px 8px' }}>
-          <table className="table">
+          {/* budgets-table: ≤860px CSS restacks each row into an editable card */}
+          <table className="table budgets-table">
             <thead>
               <tr>
                 <th>Category</th>
