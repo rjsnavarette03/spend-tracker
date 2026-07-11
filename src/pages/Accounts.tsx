@@ -14,6 +14,42 @@ const SECTIONS: Array<{ type: AccountType; title: string; hint: string }> = [
   { type: 'loan', title: 'Loans / Borrowed', hint: 'Money owed to others' },
 ];
 
+// Sort applies within each type section. The API already returns name order,
+// so 'name-asc' (the default) matches the historical view. Amount sorts use
+// the balance MAGNITUDE — "high to low" means biggest first whether it's
+// money you have (debit) or money you owe (credit/loan).
+type AccountSort = 'name-asc' | 'name-desc' | 'amount-desc' | 'amount-asc';
+const SORT_KEY = 'spendtracker-accounts-sort';
+const SORT_OPTIONS: Array<[AccountSort, string]> = [
+  ['name-asc', 'Name (A–Z)'],
+  ['name-desc', 'Name (Z–A)'],
+  ['amount-desc', 'Amount (high to low)'],
+  ['amount-asc', 'Amount (low to high)'],
+];
+
+function readSavedSort(): AccountSort {
+  const s = localStorage.getItem(SORT_KEY);
+  return SORT_OPTIONS.some(([v]) => v === s) ? (s as AccountSort) : 'name-asc';
+}
+
+function sortAccounts(list: Account[], sort: AccountSort): Account[] {
+  const arr = [...list];
+  const byName = (a: Account, b: Account) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+  const byAmount = (a: Account, b: Account) =>
+    Math.abs(a.balanceCents) - Math.abs(b.balanceCents);
+  switch (sort) {
+    case 'name-asc':
+      return arr.sort(byName);
+    case 'name-desc':
+      return arr.sort((a, b) => byName(b, a));
+    case 'amount-desc':
+      return arr.sort((a, b) => byAmount(b, a));
+    case 'amount-asc':
+      return arr.sort(byAmount);
+  }
+}
+
 export function Accounts({
   accounts,
   onDataChanged,
@@ -22,6 +58,7 @@ export function Accounts({
   onDataChanged: () => void;
 }) {
   const navigate = useNavigate();
+  const [sort, setSort] = useState<AccountSort>(readSavedSort);
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [accountModal, setAccountModal] = useState<{ open: boolean; editing: Account | null }>({
     open: false,
@@ -158,9 +195,30 @@ export function Accounts({
             </div>
           </div>
 
+          <div className="toolbar accounts-sort">
+            <label className="sort-label" htmlFor="acct-sort">
+              Sort by
+            </label>
+            <select
+              id="acct-sort"
+              value={sort}
+              onChange={(e) => {
+                const s = e.target.value as AccountSort;
+                setSort(s);
+                localStorage.setItem(SORT_KEY, s);
+              }}
+            >
+              {SORT_OPTIONS.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div className="accounts-grid">
             {SECTIONS.map(({ type, title, hint }) => {
-            const items = accounts.filter((a) => a.type === type);
+            const items = sortAccounts(accounts.filter((a) => a.type === type), sort);
             if (items.length === 0) return null;
             const subtotal = items.reduce((s, a) => s + a.balanceCents, 0);
             return (
