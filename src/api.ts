@@ -134,6 +134,10 @@ export const api: Api = {
       applyCurrency(r.currency);
       return r.currency;
     },
+    deleteAccount: async (currentPassword) => {
+      await http<{ ok: boolean }>('POST', '/auth/delete-account', { currentPassword });
+      setCsrf(''); // the session died with the account
+    },
   },
   categories: {
     list: () => http('GET', '/categories'),

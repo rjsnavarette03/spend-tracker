@@ -125,6 +125,14 @@ try {
             Auth::changePassword($me, $b['currentPassword'] ?? null, $b['newPassword'] ?? null);
             Http::json(['ok' => true]);
         }
+        if ($method === 'POST' && $sub === 'delete-account') {
+            // requireUser (not requireVerifiedUser): an unverified signup must
+            // still be able to delete itself. CSRF-checked above.
+            $me = Auth::requireUser();
+            $b = Http::readJson();
+            Auth::deleteAccount($me, $b['currentPassword'] ?? null);
+            Http::json(['ok' => true]);
+        }
         if ($method === 'POST' && $sub === 'currency') {
             $me = Auth::requireUser(); // authenticated + CSRF-checked above
             $b = Http::readJson();

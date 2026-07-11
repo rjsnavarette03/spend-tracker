@@ -13,6 +13,7 @@ import { Categories } from './pages/Categories';
 import { Dashboard } from './pages/Dashboard';
 import { Landing } from './pages/Landing';
 import { LegalPage } from './pages/Legal';
+import { Settings } from './pages/Settings';
 import { Transactions } from './pages/Transactions';
 
 type Phase = 'loading' | 'anon' | 'authed' | 'offline';
@@ -87,6 +88,10 @@ function BudgetsPage() {
 function CategoriesPage() {
   const c = useAppContext();
   return <Categories categories={c.categories} onDataChanged={c.onDataChanged} />;
+}
+function SettingsPage() {
+  const c = useAppContext();
+  return <Settings user={c.user} refreshUser={c.refreshUser} />;
 }
 
 export function AppRoot() {
@@ -247,6 +252,7 @@ export function AppRoot() {
           <Route path="accounts/:id" element={<AccountDetail />} />
           <Route path="budgets" element={<BudgetsPage />} />
           <Route path="categories" element={<CategoriesPage />} />
+          <Route path="settings" element={<SettingsPage />} />
         </Route>
         {/* Signed in: auth screens or unknown paths fall back to the dashboard. */}
         <Route path="*" element={<Navigate to="/dashboard" replace />} />

@@ -156,6 +156,9 @@ export interface Api {
     resendVerification(): Promise<void>;
     changePassword(currentPassword: string, newPassword: string): Promise<void>;
     setCurrency(currency: string): Promise<string>;
+    // Permanently deletes the user and (via DB cascades) all their data.
+    // Accounts with a password must re-confirm it; pass '' for Google-only.
+    deleteAccount(currentPassword: string): Promise<void>;
   };
   categories: {
     list(): Promise<Category[]>;

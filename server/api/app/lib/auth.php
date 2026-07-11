@@ -469,6 +469,30 @@ final class Auth
         self::issueEmailVerification($uid, (string)$u['email']);
     }
 
+    /**
+     * Permanently delete the signed-in user's account. The users row is the
+     * cascade root — every owned row (accounts, categories, transactions,
+     * transfers, budgets, resets, verifications) goes with it. Accounts with a
+     * password must re-enter it as the destructive-action confirmation;
+     * Google-only accounts are confirmed by their live session alone.
+     */
+    public static function deleteAccount(int $uid, mixed $currentPassword): void
+    {
+        Http::throttle('delete_acct:' . $uid, 5, 900);
+        $u = DB::one('SELECT id, password_hash FROM users WHERE id = ?', [$uid]);
+        if ($u === null) {
+            throw new ApiError('Not signed in', 401);
+        }
+        if ($u['password_hash'] !== null) {
+            $current = is_string($currentPassword) ? $currentPassword : '';
+            if ($current === '' || !password_verify($current, (string)$u['password_hash'])) {
+                throw new ApiError('Password is incorrect', 403);
+            }
+        }
+        DB::exec('DELETE FROM users WHERE id = ?', [$uid]);
+        self::logout();
+    }
+
     public static function logout(): void
     {
         $_SESSION = [];

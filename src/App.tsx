@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { NavLink, Outlet, useOutletContext } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate, useOutletContext } from 'react-router-dom';
 import type { Account, Category, User } from '../shared/types';
 import { api } from './api';
-import { AccountModal } from './components/AccountModal';
 import { ThemeToggle } from './components/ThemeToggle';
 import {
   BankIcon,
@@ -28,6 +27,9 @@ export interface AppContext {
   // Years that have transactions — drives the year picker (see PeriodPicker).
   availableYears: number[];
   onDataChanged: () => void;
+  // The signed-in user (kept fresh here) + re-sync — used by /settings.
+  user: User;
+  refreshUser: () => void;
 }
 
 export function useAppContext(): AppContext {
@@ -43,13 +45,13 @@ const NAV: Array<{ to: string; label: string; icon: JSX.Element }> = [
 ];
 
 export default function AppLayout({ user, onLogout }: { user: User; onLogout: () => void }) {
+  const navigate = useNavigate();
   const [period, setPeriod] = useState<Period>(() => currentPeriod('month'));
   const [categories, setCategories] = useState<Category[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [availableYears, setAvailableYears] = useState<number[]>([]);
-  // Local copy so hasPassword/hasGoogle can refresh after account changes.
+  // Local copy so hasPassword/hasGoogle/currency can refresh after /settings changes.
   const [account, setAccount] = useState<User>(user);
-  const [showAccount, setShowAccount] = useState(false);
 
   const refreshCategories = useCallback(async () => {
     try {
@@ -100,7 +102,16 @@ export default function AppLayout({ user, onLogout }: { user: User; onLogout: ()
     void refreshYears();
   }, [refreshCategories, refreshAccounts, refreshYears]);
 
-  const ctx: AppContext = { period, setPeriod, categories, accounts, availableYears, onDataChanged };
+  const ctx: AppContext = {
+    period,
+    setPeriod,
+    categories,
+    accounts,
+    availableYears,
+    onDataChanged,
+    user: account,
+    refreshUser: refreshAccount,
+  };
 
   return (
     <div className="app">
@@ -117,9 +128,9 @@ export default function AppLayout({ user, onLogout }: { user: User; onLogout: ()
           <ThemeToggle />
           <button
             className="btn-icon"
-            onClick={() => setShowAccount(true)}
-            title="Account settings"
-            aria-label="Account settings"
+            onClick={() => navigate('/settings')}
+            title="Settings"
+            aria-label="Settings"
           >
             <SettingsIcon />
           </button>
@@ -159,7 +170,7 @@ export default function AppLayout({ user, onLogout }: { user: User; onLogout: ()
             <span className="user-email">{account.name || account.email}</span>
             <div className="user-actions">
               <ThemeToggle />
-              <button className="btn-icon" onClick={() => setShowAccount(true)} title="Account settings">
+              <button className="btn-icon" onClick={() => navigate('/settings')} title="Settings">
                 <SettingsIcon />
               </button>
               <button className="btn-icon logout-btn" onClick={onLogout} title="Sign out">
@@ -195,14 +206,6 @@ export default function AppLayout({ user, onLogout }: { user: User; onLogout: ()
           </NavLink>
         ))}
       </nav>
-
-      {showAccount && (
-        <AccountModal
-          user={account}
-          onClose={() => setShowAccount(false)}
-          onChanged={refreshAccount}
-        />
-      )}
     </div>
   );
 }

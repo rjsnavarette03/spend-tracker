@@ -1981,6 +1981,51 @@ select {
   line-height: 1.5;
 }
 
+/* ---------- settings page ---------- */
+
+/* Forms read best on a constrained measure, not the full desktop width. */
+.settings-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 560px;
+}
+
+.danger-panel {
+  border-color: rgba(248, 113, 113, 0.4);
+}
+
+.danger-title {
+  color: var(--red);
+}
+
+.danger-text {
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+.danger-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+/* The danger zone's buttons are real actions — make the destructive one
+   unmistakably red (filled), not just red text. */
+.danger-panel .btn-danger {
+  background: var(--red-dim);
+  border-color: rgba(248, 113, 113, 0.4);
+}
+
+.danger-panel .btn-danger:hover:not(:disabled) {
+  background: rgba(248, 113, 113, 0.25);
+}
+
 .verify-intro {
   font-size: 13px;
   color: var(--text-dim);

@@ -808,6 +808,44 @@ let bankId = 0;
   check('new password works after change', newTry.status === 200 && newTry.data.user?.email === email);
 }
 
+// ---------- delete account (cascades all data, session destroyed) ----------
+{
+  const c = new Client();
+  await c.call('GET', '/auth/me').then((r) => (c.csrf = r.data.csrf));
+  const email = `deleteme.${suffix}@test.local`;
+  const reg = await c.call('POST', '/auth/register', { email, password, name: 'Del' });
+  c.csrf = reg.data.csrf;
+  await verifyClient(c, email);
+
+  // Give the account data so the cascade is exercised.
+  const cat = await c.call('POST', '/categories', { name: 'DelCat', type: 'expense', color: '#123123' });
+  await c.call('POST', '/transactions', {
+    amountCents: 100, type: 'expense', categoryId: cat.data.id, date: `${MONTH}-01`, note: 'doomed',
+  });
+
+  const anon = new Client();
+  await anon.call('GET', '/auth/me').then((r) => (anon.csrf = r.data.csrf));
+  const noAuth = await anon.call('POST', '/auth/delete-account', { currentPassword: password });
+  check('delete-account requires auth -> 401', noAuth.status === 401, `got ${noAuth.status}`);
+
+  const wrongPw = await c.call('POST', '/auth/delete-account', { currentPassword: 'not-right-1' });
+  check('delete-account with wrong password -> 403', wrongPw.status === 403, `got ${wrongPw.status}`);
+
+  const ok = await c.call('POST', '/auth/delete-account', { currentPassword: password });
+  check('delete-account succeeds', ok.status === 200 && ok.data.ok === true, JSON.stringify(ok.data));
+
+  const me = await c.call('GET', '/auth/me');
+  check('session destroyed after delete', me.data.user === null);
+  c.csrf = me.data.csrf;
+
+  const login = await c.call('POST', '/auth/login', { email, password });
+  check('deleted account cannot log in -> 401', login.status === 401, `got ${login.status}`);
+
+  // The unique email is freed — the row (and its data) really went away.
+  const reReg = await c.call('POST', '/auth/register', { email, password, name: 'Del2' });
+  check('email reusable after delete', reReg.status === 200, `got ${reReg.status}`);
+}
+
 // ---------- forgot / reset password ----------
 {
   // Endpoint always returns ok, even for unknown emails (no enumeration).
