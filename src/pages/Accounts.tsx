@@ -7,7 +7,7 @@ import { AccountEditModal } from '../components/AccountEditModal';
 import { DueTag } from '../components/DueTag';
 import { PencilIcon, PlusIcon, TransferIcon, TrashIcon } from '../components/Icons';
 import { TransferModal } from '../components/TransferModal';
-import { cleanError, dateLabel, fmtMoney } from '../format';
+import { cleanError, dateLabel, fmtMoney, nextDueInfo } from '../format';
 
 const SECTIONS: Array<{ type: AccountType; title: string; hint: string }> = [
   { type: 'debit', title: 'Debit', hint: 'Cash, banks & e-wallets' },
@@ -15,22 +15,48 @@ const SECTIONS: Array<{ type: AccountType; title: string; hint: string }> = [
   { type: 'loan', title: 'Loans / Borrowed', hint: 'Money owed to others' },
 ];
 
-// Sort applies within each type section. The API already returns name order,
-// so 'name-asc' (the default) matches the historical view. Amount sorts use
-// the balance MAGNITUDE — "high to low" means biggest first whether it's
-// money you have (debit) or money you owe (credit/loan).
-type AccountSort = 'name-asc' | 'name-desc' | 'amount-desc' | 'amount-asc';
-const SORT_KEY = 'spendtracker-accounts-sort';
+// Each type section carries its own sort, chosen from a select inside the
+// card. 'name-asc' (the default) matches the historical API name order.
+// Amount sorts use the balance MAGNITUDE — "high to low" means biggest first
+// whether it's money you have (debit) or money you owe (credit/loan).
+// 'due-asc' (credit/loan only — debit accounts can't have due days) puts the
+// account whose payment lands soonest first; accounts with no upcoming
+// payment (no due day, or nothing owed — same rule as the due pill) go last.
+type AccountSort = 'name-asc' | 'name-desc' | 'amount-desc' | 'amount-asc' | 'due-asc';
+type SortByType = Record<AccountType, AccountSort>;
+const SORT_KEY = 'spendtracker-accounts-sort-v2'; // JSON { debit, credit, loan }
+const LEGACY_SORT_KEY = 'spendtracker-accounts-sort'; // v1: one page-wide value
 const SORT_OPTIONS: Array<[AccountSort, string]> = [
   ['name-asc', 'Name (A–Z)'],
   ['name-desc', 'Name (Z–A)'],
   ['amount-desc', 'Amount (high to low)'],
   ['amount-asc', 'Amount (low to high)'],
+  ['due-asc', 'Due date (soonest)'],
 ];
 
-function readSavedSort(): AccountSort {
-  const s = localStorage.getItem(SORT_KEY);
-  return SORT_OPTIONS.some(([v]) => v === s) ? (s as AccountSort) : 'name-asc';
+function isSort(v: unknown): v is AccountSort {
+  return SORT_OPTIONS.some(([s]) => s === v);
+}
+
+function readSavedSorts(): SortByType {
+  // Runs as a useState initializer (render phase), so localStorage itself may
+  // throw here (storage-blocked browsers) — everything stays inside the try.
+  const out: SortByType = { debit: 'name-asc', credit: 'name-asc', loan: 'name-asc' };
+  try {
+    // The old single value (pre per-card sorts) seeds all three sections.
+    const legacy = localStorage.getItem(LEGACY_SORT_KEY);
+    if (isSort(legacy) && legacy !== 'due-asc') {
+      out.debit = out.credit = out.loan = legacy;
+    }
+    const parsed: unknown = JSON.parse(localStorage.getItem(SORT_KEY) ?? '');
+    for (const type of ['debit', 'credit', 'loan'] as const) {
+      const v = (parsed as Record<string, unknown>)?.[type];
+      if (isSort(v) && !(type === 'debit' && v === 'due-asc')) out[type] = v;
+    }
+  } catch {
+    /* storage unavailable or nothing saved yet — defaults stand */
+  }
+  return out;
 }
 
 function sortAccounts(list: Account[], sort: AccountSort): Account[] {
@@ -39,6 +65,9 @@ function sortAccounts(list: Account[], sort: AccountSort): Account[] {
     a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
   const byAmount = (a: Account, b: Account) =>
     Math.abs(a.balanceCents) - Math.abs(b.balanceCents);
+  // Days until the next payment; no upcoming payment sorts last (Infinity).
+  const dueDays = (a: Account) =>
+    a.dueDay != null && a.balanceCents < 0 ? nextDueInfo(a.dueDay, a.dueDay2).days : Infinity;
   switch (sort) {
     case 'name-asc':
       return arr.sort(byName);
@@ -48,6 +77,8 @@ function sortAccounts(list: Account[], sort: AccountSort): Account[] {
       return arr.sort((a, b) => byAmount(b, a));
     case 'amount-asc':
       return arr.sort(byAmount);
+    case 'due-asc':
+      return arr.sort((a, b) => dueDays(a) - dueDays(b) || byName(a, b));
   }
 }
 
@@ -59,7 +90,7 @@ export function Accounts({
   onDataChanged: () => void;
 }) {
   const navigate = useNavigate();
-  const [sort, setSort] = useState<AccountSort>(readSavedSort);
+  const [sorts, setSorts] = useState<SortByType>(readSavedSorts);
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [accountModal, setAccountModal] = useState<{ open: boolean; editing: Account | null }>({
     open: false,
@@ -196,30 +227,9 @@ export function Accounts({
             </div>
           </div>
 
-          <div className="toolbar accounts-sort">
-            <label className="sort-label" htmlFor="acct-sort">
-              Sort by
-            </label>
-            <select
-              id="acct-sort"
-              value={sort}
-              onChange={(e) => {
-                const s = e.target.value as AccountSort;
-                setSort(s);
-                localStorage.setItem(SORT_KEY, s);
-              }}
-            >
-              {SORT_OPTIONS.map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </div>
-
           <div className="accounts-grid">
             {SECTIONS.map(({ type, title, hint }) => {
-            const items = sortAccounts(accounts.filter((a) => a.type === type), sort);
+            const items = sortAccounts(accounts.filter((a) => a.type === type), sorts[type]);
             if (items.length === 0) return null;
             const subtotal = items.reduce((s, a) => s + a.balanceCents, 0);
             return (
@@ -234,6 +244,38 @@ export function Accounts({
                     {fmtMoney(subtotal)}
                   </span>
                 </div>
+                {/* Per-card sort; hidden when there's nothing to reorder. */}
+                {items.length > 1 && (
+                  <div className="card-sort">
+                    <label className="sort-label" htmlFor={`acct-sort-${type}`}>
+                      Sort
+                    </label>
+                    <select
+                      id={`acct-sort-${type}`}
+                      // The visible label is just "Sort"; name the section so
+                      // screen-reader lists can tell the three cards apart.
+                      aria-label={`Sort ${title} accounts`}
+                      value={sorts[type]}
+                      onChange={(e) => {
+                        const next = { ...sorts, [type]: e.target.value as AccountSort };
+                        setSorts(next);
+                        try {
+                          localStorage.setItem(SORT_KEY, JSON.stringify(next));
+                        } catch {
+                          /* storage unavailable — sort still applies this visit */
+                        }
+                      }}
+                    >
+                      {SORT_OPTIONS.filter(([v]) => type !== 'debit' || v !== 'due-asc').map(
+                        ([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        )
+                      )}
+                    </select>
+                  </div>
+                )}
                 <table className="table">
                   <tbody>
                     {items.map((a) => (

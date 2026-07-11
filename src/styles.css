@@ -2112,8 +2112,22 @@ select {
 
 /* ---------- accounts & transfers ---------- */
 
-.accounts-sort {
-  margin-bottom: 12px;
+/* Per-card sort control, right-aligned between a section's header and its
+   account list. Compact sizing is desktop-only so the ≤860px global input
+   rule (16px / 44px — stops iOS focus-zoom) still applies on mobile. */
+.card-sort {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin: -4px 0 10px;
+}
+
+@media (min-width: 861px) {
+  .card-sort select {
+    padding: 4px 8px;
+    font-size: 12.5px;
+  }
 }
 
 /* Next-payment tag on credit/loan accounts (see components/DueTag). */
