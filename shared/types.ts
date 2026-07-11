@@ -37,6 +37,13 @@ export interface Account {
   // the color; color is kept as the fallback (and identity color in compact
   // lists like transactions/transfers).
   image: string | null;
+  // Monthly payment due day(s) (1–31) for credit/loan accounts; null = none.
+  // The UI computes and shows the NEXT due date from these, so they never go
+  // stale after a payment (days 29–31 clamp in shorter months). dueDay2
+  // supports twice-a-month cycles (e.g. 15th + 30th); the server normalizes
+  // so dueDay is always the earlier/only day.
+  dueDay: number | null;
+  dueDay2: number | null;
   openingBalanceCents: number;
   balanceCents: number;
   txCount: number;
@@ -173,11 +180,20 @@ export interface Api {
       type: AccountType;
       color: string;
       image: string | null;
+      dueDay: number | null;
+      dueDay2: number | null;
       openingBalanceCents: number;
     }): Promise<Account>;
     update(
       id: number,
-      data: { name: string; color: string; image: string | null; openingBalanceCents: number }
+      data: {
+        name: string;
+        color: string;
+        image: string | null;
+        dueDay: number | null;
+        dueDay2: number | null;
+        openingBalanceCents: number;
+      }
     ): Promise<void>;
     remove(id: number): Promise<void>;
   };

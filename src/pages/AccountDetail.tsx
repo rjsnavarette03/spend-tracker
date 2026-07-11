@@ -4,6 +4,7 @@ import type { Transaction, Transfer } from '../../shared/types';
 import { api } from '../api';
 import { useAppContext } from '../App';
 import { AccountEditModal } from '../components/AccountEditModal';
+import { DueTag } from '../components/DueTag';
 import { PayModal } from '../components/PayModal';
 import { TransactionModal } from '../components/TransactionModal';
 import { TransferModal } from '../components/TransferModal';
@@ -170,6 +171,11 @@ export function AccountDetail() {
         <span className={`account-balance-value ${negative ? 'amount-expense' : 'amount-income'}`}>
           {fmtMoney(Math.abs(account.balanceCents))}
         </span>
+        {account.dueDay != null && negative && (
+          <span className="due-line">
+            <DueTag dueDay={account.dueDay} dueDay2={account.dueDay2} />
+          </span>
+        )}
       </div>
 
       <div className="panel" style={{ marginTop: 14 }}>

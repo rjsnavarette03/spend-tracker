@@ -5,6 +5,7 @@ import {
   centsToInput,
   cleanError,
   fmtMoney,
+  ordinal,
   parseAmountToCents,
   parseSignedAmountToCents,
   todayStr,
@@ -23,6 +24,8 @@ const TYPE_LABELS: Record<AccountType, string> = {
   credit: 'Credit',
   loan: 'Loan / Borrowed',
 };
+
+const DUE_DAYS = Array.from({ length: 31 }, (_, i) => i + 1);
 
 export function AccountEditModal({
   initial,
@@ -47,6 +50,14 @@ export function AccountEditModal({
   // Field holds a positive magnitude; the backend signs it by account type.
   const [opening, setOpening] = useState(
     initial ? centsToInput(Math.abs(initial.openingBalanceCents)) : ''
+  );
+  // Monthly payment due day(s) (credit/loan only); '' = no due date. The
+  // second day covers twice-a-month plans (e.g. paid every 15th and 30th).
+  const [dueDay, setDueDay] = useState<string>(
+    initial?.dueDay != null ? String(initial.dueDay) : ''
+  );
+  const [dueDay2, setDueDay2] = useState<string>(
+    initial?.dueDay2 != null ? String(initial.dueDay2) : ''
   );
   // New-loan extras: optionally deposit the borrowed amount into a debit
   // account, with an optional transaction fee. Total owed = amount + fee;
@@ -106,6 +117,10 @@ export function AccountEditModal({
       return;
     }
     const imageToSave = mode === 'image' ? image : null;
+    const dueDayToSave = type !== 'debit' && dueDay !== '' ? Number(dueDay) : null;
+    // No second day without a first (the server normalizes this too).
+    const dueDay2ToSave =
+      dueDayToSave !== null && dueDay2 !== '' && dueDay2 !== dueDay ? Number(dueDay2) : null;
     setSaving(true);
     try {
       if (initial) {
@@ -113,6 +128,8 @@ export function AccountEditModal({
           name: name.trim(),
           color,
           image: imageToSave,
+          dueDay: dueDayToSave,
+          dueDay2: dueDay2ToSave,
           openingBalanceCents: openingCents,
         });
       } else if (isNewLoan && destId) {
@@ -124,6 +141,8 @@ export function AccountEditModal({
           type,
           color,
           image: imageToSave,
+          dueDay: dueDayToSave,
+          dueDay2: dueDay2ToSave,
           openingBalanceCents: 0,
         });
         try {
@@ -150,6 +169,8 @@ export function AccountEditModal({
           type,
           color,
           image: imageToSave,
+          dueDay: dueDayToSave,
+          dueDay2: dueDay2ToSave,
           // A fee on an untracked payout still counts toward the debt.
           openingBalanceCents: isNewLoan ? loanAmount + feeCents : openingCents,
         });
@@ -208,6 +229,48 @@ export function AccountEditModal({
                 : 'How much you currently owe / borrowed'}
           </div>
         </div>
+
+        {type !== 'debit' && (
+          <div className="field">
+            <label htmlFor="acc-due-day">Payment due day (optional)</label>
+            <select
+              id="acc-due-day"
+              value={dueDay}
+              onChange={(e) => {
+                setDueDay(e.target.value);
+                if (e.target.value === '') setDueDay2(''); // no second day without a first
+              }}
+            >
+              <option value="">No due date</option>
+              {DUE_DAYS.map((d) => (
+                <option key={d} value={d}>
+                  {ordinal(d)} of every month
+                </option>
+              ))}
+            </select>
+            <div className="field-hint">
+              Shows the next due date on your accounts — days 29–31 fall on the last day of
+              shorter months.
+            </div>
+          </div>
+        )}
+
+        {type !== 'debit' && dueDay !== '' && (
+          <div className="field">
+            <label htmlFor="acc-due-day2">Second due day (optional)</label>
+            <select id="acc-due-day2" value={dueDay2} onChange={(e) => setDueDay2(e.target.value)}>
+              <option value="">None — paid once a month</option>
+              {DUE_DAYS.filter((d) => String(d) !== dueDay).map((d) => (
+                <option key={d} value={d}>
+                  {ordinal(d)} of every month
+                </option>
+              ))}
+            </select>
+            <div className="field-hint">
+              For twice-a-month plans — the accounts list always shows whichever payment is next.
+            </div>
+          </div>
+        )}
 
         {isNewLoan && (
           <>

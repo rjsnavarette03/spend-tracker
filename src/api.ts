@@ -154,11 +154,20 @@ export const api: Api = {
       type: AccountType;
       color: string;
       image: string | null;
+      dueDay: number | null;
+      dueDay2: number | null;
       openingBalanceCents: number;
     }) => http('POST', '/accounts', data),
     update: (
       id: number,
-      data: { name: string; color: string; image: string | null; openingBalanceCents: number }
+      data: {
+        name: string;
+        color: string;
+        image: string | null;
+        dueDay: number | null;
+        dueDay2: number | null;
+        openingBalanceCents: number;
+      }
     ) => http('PUT', `/accounts/${id}`, data),
     remove: (id: number) => http('DELETE', `/accounts/${id}`),
   },

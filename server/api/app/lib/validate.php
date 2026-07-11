@@ -121,6 +121,24 @@ final class Validate
         return $t;
     }
 
+    /** Monthly payment due day for credit/loan accounts: null or 1–31. */
+    public static function dueDayOrNull(mixed $v): ?int
+    {
+        if ($v === null || $v === '') {
+            return null;
+        }
+        if (is_string($v) && ctype_digit($v)) {
+            $v = (int)$v;
+        }
+        if (is_float($v) && floor($v) === $v) {
+            $v = (int)$v;
+        }
+        if (!is_int($v) || $v < 1 || $v > 31) {
+            throw new ApiError('Due day must be between 1 and 31', 422);
+        }
+        return $v;
+    }
+
     /** Budget cadence: the recurring period a budget amount applies to. */
     public static function cadence(mixed $c): string
     {

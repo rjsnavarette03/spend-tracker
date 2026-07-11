@@ -26,6 +26,11 @@ CREATE TABLE IF NOT EXISTS accounts (
     type ENUM('debit','credit','loan') NOT NULL,
     color CHAR(7) NOT NULL DEFAULT '#38bdf8',
     image MEDIUMTEXT NULL,
+    -- Monthly payment due day(s) (1-31) for credit/loan accounts; NULL = none.
+    -- due_day2 supports twice-a-month cycles (e.g. 15th + 30th); the server
+    -- normalizes so due_day is always the earlier/only day.
+    due_day TINYINT NULL,
+    due_day2 TINYINT NULL,
     opening_balance_cents BIGINT NOT NULL DEFAULT 0,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),

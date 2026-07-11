@@ -260,6 +260,47 @@ export function dateLabel(date: string): string {
   });
 }
 
+/** 1 → "1st", 22 → "22nd", 13 → "13th". */
+export function ordinal(n: number): string {
+  const v = n % 100;
+  const suffix = v >= 11 && v <= 13 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th');
+  return `${n}${suffix}`;
+}
+
+/**
+ * Next occurrence among one or two monthly payment due days (credit/loan
+ * accounts; two days = twice-a-month plans like the 15th + 30th). Today
+ * counts as due; days 29–31 clamp to the last day of shorter months (a "due
+ * on the 31st" card is due Feb 28). Because only days-of-month are stored,
+ * the computed date always self-advances after each cycle.
+ */
+export function nextDueInfo(dueDay: number, dueDay2?: number | null): { days: number; label: string } {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  const nextFor = (day: number): Date => {
+    const clamped = (y: number, m: number) => Math.min(day, new Date(y, m + 1, 0).getDate());
+    let due = new Date(today.getFullYear(), today.getMonth(), clamped(today.getFullYear(), today.getMonth()));
+    if (due < today) {
+      const y = today.getMonth() === 11 ? today.getFullYear() + 1 : today.getFullYear();
+      const m = (today.getMonth() + 1) % 12;
+      due = new Date(y, m, clamped(y, m));
+    }
+    return due;
+  };
+
+  const candidates = [dueDay, ...(dueDay2 != null ? [dueDay2] : [])].map(nextFor);
+  const due = candidates.reduce((a, b) => (b < a ? b : a));
+  const days = Math.round((due.getTime() - today.getTime()) / 86400000);
+  const label =
+    days === 0
+      ? 'Due today'
+      : days === 1
+        ? 'Due tomorrow'
+        : 'Due ' + due.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return { days, label };
+}
+
 export function cleanError(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }

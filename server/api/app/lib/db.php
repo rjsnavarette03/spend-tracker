@@ -185,6 +185,21 @@ final class DB
                 : 'ALTER TABLE users ADD COLUMN email_verified TINYINT(1) NOT NULL DEFAULT 1';
             self::tryDdl($col);
         }
+
+        // Step 7: accounts.due_day / due_day2 (monthly payment due days for
+        // credit/loan accounts; NULL = none; due_day2 = twice-a-month cycles).
+        if (!self::columnExists('accounts', 'due_day')) {
+            $col = $driver === 'sqlite'
+                ? 'ALTER TABLE accounts ADD COLUMN due_day INTEGER NULL'
+                : 'ALTER TABLE accounts ADD COLUMN due_day TINYINT NULL';
+            self::tryDdl($col);
+        }
+        if (!self::columnExists('accounts', 'due_day2')) {
+            $col = $driver === 'sqlite'
+                ? 'ALTER TABLE accounts ADD COLUMN due_day2 INTEGER NULL'
+                : 'ALTER TABLE accounts ADD COLUMN due_day2 TINYINT NULL';
+            self::tryDdl($col);
+        }
     }
 
     /** True if `SELECT $col FROM $table` works (i.e. the column exists). */

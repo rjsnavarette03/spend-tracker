@@ -20,6 +20,11 @@ CREATE TABLE IF NOT EXISTS accounts (
     type TEXT NOT NULL CHECK (type IN ('debit','credit','loan')),
     color TEXT NOT NULL DEFAULT '#38bdf8',
     image TEXT NULL,
+    -- Monthly payment due day(s) (1-31) for credit/loan accounts; NULL = none.
+    -- due_day2 supports twice-a-month cycles (e.g. 15th + 30th); the server
+    -- normalizes so due_day is always the earlier/only day.
+    due_day INTEGER NULL,
+    due_day2 INTEGER NULL,
     opening_balance_cents INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

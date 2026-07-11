@@ -507,6 +507,59 @@ let bankId = 0;
   const badType = await a.call('POST', '/accounts', { name: 'X', type: 'cash', color: '#38bdf8', openingBalanceCents: 0 });
   check('invalid account type -> 422', badType.status === 422, `got ${badType.status}`);
 
+  // ---------- payment due day (credit/loan monthly cycles) ----------
+  const ccDue = await a.call('POST', '/accounts', {
+    name: 'Due Card', type: 'credit', color: '#f87171', openingBalanceCents: 10000, dueDay: 15,
+  });
+  check('create credit with dueDay', ccDue.status === 201 && ccDue.data.dueDay === 15, JSON.stringify(ccDue.data));
+  const dueInList = (await a.call('GET', '/accounts')).data.find((x) => x.id === ccDue.data.id);
+  check('dueDay round-trips in list', dueInList?.dueDay === 15, `got ${dueInList?.dueDay}`);
+
+  await a.call('PUT', `/accounts/${ccDue.data.id}`, { name: 'Due Card', color: '#f87171', openingBalanceCents: 10000, dueDay: 5 });
+  const dueUpd = (await a.call('GET', '/accounts')).data.find((x) => x.id === ccDue.data.id);
+  check('dueDay updates', dueUpd?.dueDay === 5, `got ${dueUpd?.dueDay}`);
+
+  await a.call('PUT', `/accounts/${ccDue.data.id}`, { name: 'Due Card', color: '#f87171', openingBalanceCents: 10000, dueDay: null });
+  const dueCleared = (await a.call('GET', '/accounts')).data.find((x) => x.id === ccDue.data.id);
+  check('dueDay clears to null', dueCleared?.dueDay === null, `got ${dueCleared?.dueDay}`);
+
+  const badDue = await a.call('POST', '/accounts', {
+    name: 'Bad Due', type: 'credit', color: '#f87171', openingBalanceCents: 0, dueDay: 32,
+  });
+  check('dueDay 32 -> 422', badDue.status === 422, `got ${badDue.status}`);
+
+  const debitDue = await a.call('POST', '/accounts', {
+    name: 'Debit Due', type: 'debit', color: '#38bdf8', openingBalanceCents: 0, dueDay: 10,
+  });
+  check('dueDay on a debit account -> 422', debitDue.status === 422, `got ${debitDue.status}`);
+
+  // Twice-a-month plans: a second due day. Server normalizes the pair —
+  // sorted, deduped, and a lone second day is promoted to the first slot.
+  const twice = await a.call('POST', '/accounts', {
+    name: 'Twice Card', type: 'credit', color: '#f87171', openingBalanceCents: 0, dueDay: 30, dueDay2: 15,
+  });
+  check('two due days normalize sorted', twice.status === 201 && twice.data.dueDay === 15 && twice.data.dueDay2 === 30, JSON.stringify(twice.data));
+
+  await a.call('PUT', `/accounts/${twice.data.id}`, {
+    name: 'Twice Card', color: '#f87171', openingBalanceCents: 0, dueDay: null, dueDay2: 20,
+  });
+  const promoted = (await a.call('GET', '/accounts')).data.find((x) => x.id === twice.data.id);
+  check('lone second day promoted to first', promoted?.dueDay === 20 && promoted?.dueDay2 === null, JSON.stringify({ d: promoted?.dueDay, d2: promoted?.dueDay2 }));
+
+  await a.call('PUT', `/accounts/${twice.data.id}`, {
+    name: 'Twice Card', color: '#f87171', openingBalanceCents: 0, dueDay: 12, dueDay2: 12,
+  });
+  const deduped = (await a.call('GET', '/accounts')).data.find((x) => x.id === twice.data.id);
+  check('duplicate due days collapse', deduped?.dueDay === 12 && deduped?.dueDay2 === null, JSON.stringify({ d: deduped?.dueDay, d2: deduped?.dueDay2 }));
+
+  const badDue2 = await a.call('POST', '/accounts', {
+    name: 'Bad Due2', type: 'credit', color: '#f87171', openingBalanceCents: 0, dueDay: 5, dueDay2: 40,
+  });
+  check('dueDay2 40 -> 422', badDue2.status === 422, `got ${badDue2.status}`);
+
+  await a.call('DELETE', `/accounts/${twice.data.id}`);
+  await a.call('DELETE', `/accounts/${ccDue.data.id}`); // keep later counts predictable
+
   // ---------- account custom image (color OR image) ----------
   const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 

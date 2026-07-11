@@ -4,6 +4,7 @@ import type { Account, AccountType, Transfer } from '../../shared/types';
 import { api } from '../api';
 import { confirm, toast } from '../components/feedback';
 import { AccountEditModal } from '../components/AccountEditModal';
+import { DueTag } from '../components/DueTag';
 import { PencilIcon, PlusIcon, TransferIcon, TrashIcon } from '../components/Icons';
 import { TransferModal } from '../components/TransferModal';
 import { cleanError, dateLabel, fmtMoney } from '../format';
@@ -250,6 +251,12 @@ export function Accounts({
                             )}
                             <span>{a.name}</span>
                           </span>
+                          {/* Next payment date — only while something is owed. */}
+                          {a.dueDay != null && a.balanceCents < 0 && (
+                            <div className="due-line">
+                              <DueTag dueDay={a.dueDay} dueDay2={a.dueDay2} />
+                            </div>
+                          )}
                         </td>
                         <td className={`num ${a.balanceCents < 0 ? 'amount-expense' : 'amount-income'}`}>
                           {fmtMoney(a.balanceCents)}

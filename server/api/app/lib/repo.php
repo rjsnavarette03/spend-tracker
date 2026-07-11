@@ -272,6 +272,7 @@ final class Repo
     {
         $rows = DB::all(
             "SELECT a.id, a.name, a.type, a.color, a.image,
+                    a.due_day AS dueDay, a.due_day2 AS dueDay2,
                     a.opening_balance_cents AS openingBalanceCents,
                     a.opening_balance_cents
                     + COALESCE((SELECT SUM(CASE WHEN t.type = 'income' THEN t.amount_cents ELSE -t.amount_cents END)
@@ -295,6 +296,8 @@ final class Repo
             'type' => (string)$r['type'],
             'color' => (string)$r['color'],
             'image' => $r['image'] === null ? null : (string)$r['image'],
+            'dueDay' => $r['dueDay'] === null ? null : (int)$r['dueDay'],
+            'dueDay2' => $r['dueDay2'] === null ? null : (int)$r['dueDay2'],
             'openingBalanceCents' => (int)$r['openingBalanceCents'],
             'balanceCents' => (int)$r['balanceCents'],
             'txCount' => (int)$r['txCount'],
@@ -317,17 +320,39 @@ final class Repo
         return $type === 'debit' ? $magnitude : -$magnitude;
     }
 
+    /**
+     * Due days track monthly payment cycles — meaningless on a debit account.
+     * Accepts up to two days (twice-a-month plans, e.g. 15th + 30th) and
+     * normalizes: dedupes, sorts, and promotes a lone second day, so due_day
+     * is always the earlier/only day and due_day2 only exists alongside it.
+     *
+     * @return array{0: ?int, 1: ?int} [due_day, due_day2]
+     */
+    private static function dueDaysFor(string $type, mixed $raw, mixed $raw2): array
+    {
+        $days = array_values(array_unique(array_filter(
+            [Validate::dueDayOrNull($raw), Validate::dueDayOrNull($raw2)],
+            static fn(?int $d): bool => $d !== null
+        )));
+        sort($days);
+        if ($days !== [] && $type === 'debit') {
+            throw new ApiError('Due day only applies to credit and loan accounts', 422);
+        }
+        return [$days[0] ?? null, $days[1] ?? null];
+    }
+
     /** @return array<string, mixed> */
-    public static function createAccount(int $uid, mixed $name, mixed $type, mixed $color, mixed $openingBalanceCents, mixed $image = null): array
+    public static function createAccount(int $uid, mixed $name, mixed $type, mixed $color, mixed $openingBalanceCents, mixed $image = null, mixed $dueDay = null, mixed $dueDay2 = null): array
     {
         $name = Validate::name($name);
         $type = Validate::accountType($type);
         $color = Validate::color($color);
         $image = Validate::accountImage($image);
+        [$dueDay, $dueDay2] = self::dueDaysFor($type, $dueDay, $dueDay2);
         $opening = self::signedOpening($type, $openingBalanceCents);
         $id = DB::insert(
-            'INSERT INTO accounts (user_id, name, type, color, image, opening_balance_cents) VALUES (?, ?, ?, ?, ?, ?)',
-            [$uid, $name, $type, $color, $image, $opening]
+            'INSERT INTO accounts (user_id, name, type, color, image, due_day, due_day2, opening_balance_cents) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [$uid, $name, $type, $color, $image, $dueDay, $dueDay2, $opening]
         );
         return [
             'id' => $id,
@@ -335,6 +360,8 @@ final class Repo
             'type' => $type,
             'color' => $color,
             'image' => $image,
+            'dueDay' => $dueDay,
+            'dueDay2' => $dueDay2,
             'openingBalanceCents' => $opening,
             'balanceCents' => $opening,
             'txCount' => 0,
@@ -343,7 +370,7 @@ final class Repo
     }
 
     /** Type is immutable after creation (changing it would re-interpret history). */
-    public static function updateAccount(int $uid, int $id, mixed $name, mixed $color, mixed $openingBalanceCents, mixed $image = null): void
+    public static function updateAccount(int $uid, int $id, mixed $name, mixed $color, mixed $openingBalanceCents, mixed $image = null, mixed $dueDay = null, mixed $dueDay2 = null): void
     {
         $name = Validate::name($name);
         $color = Validate::color($color);
@@ -353,10 +380,11 @@ final class Repo
         if ($existing === null) {
             throw new ApiError('Account not found', 404);
         }
+        [$dueDay, $dueDay2] = self::dueDaysFor((string)$existing['type'], $dueDay, $dueDay2);
         $opening = self::signedOpening((string)$existing['type'], $openingBalanceCents);
         DB::exec(
-            'UPDATE accounts SET name = ?, color = ?, image = ?, opening_balance_cents = ? WHERE id = ? AND user_id = ?',
-            [$name, $color, $image, $opening, $id, $uid]
+            'UPDATE accounts SET name = ?, color = ?, image = ?, due_day = ?, due_day2 = ?, opening_balance_cents = ? WHERE id = ? AND user_id = ?',
+            [$name, $color, $image, $dueDay, $dueDay2, $opening, $id, $uid]
         );
     }
 
