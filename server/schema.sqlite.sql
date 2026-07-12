@@ -109,8 +109,7 @@ CREATE TABLE IF NOT EXISTS password_resets (
 CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets(user_id);
 
 -- Pending email verifications: one active row per user (UNIQUE user_id), holding
--- a hashed 6-digit code and a hashed backup link token. Newest table, so
--- DB::ensureSchema probes it to decide whether to replay the schema.
+-- a hashed 6-digit code and a hashed backup link token.
 CREATE TABLE IF NOT EXISTS email_verifications (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
@@ -120,3 +119,26 @@ CREATE TABLE IF NOT EXISTS email_verifications (
     expires_at INTEGER NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 )
+;
+
+-- Recurring subscriptions (see MySQL schema for full notes). Newest table:
+-- DB::ensureSchema probes it to decide whether to replay the schema.
+CREATE TABLE IF NOT EXISTS subscriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    account_id INTEGER NULL REFERENCES accounts(id) ON DELETE SET NULL,
+    category_id INTEGER NULL REFERENCES categories(id) ON DELETE SET NULL,
+    name TEXT NOT NULL,
+    amount_cents INTEGER NOT NULL,
+    cycle TEXT NOT NULL CHECK (cycle IN ('monthly','interval')),
+    bill_day INTEGER NULL,
+    interval_days INTEGER NULL,
+    next_date TEXT NOT NULL,
+    -- Last cycle date actually charged; updates may never move next_date
+    -- back to or before it (prevents stale-client double charges).
+    charged_through TEXT NULL,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_subscriptions_user_due ON subscriptions(user_id, active, next_date);

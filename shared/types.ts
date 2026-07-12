@@ -122,6 +122,44 @@ export interface Budget {
   spentCents: number;
 }
 
+// Recurring subscription (Netflix, internet, ...) auto-charged from a linked
+// debit/credit account. When nextDate arrives the server inserts an ordinary
+// expense transaction (dated nextDate) and advances nextDate one cycle:
+// 'monthly' re-lands on billDay every month (29–31 clamp in short months),
+// 'interval' adds intervalDays (e.g. every 30 days). Charges post on the next
+// API request after the date passes (no cron on shared hosting) and catch up
+// if several cycles were missed. accountId goes null if the account is
+// deleted — charging pauses until relinked.
+export type SubscriptionCycle = 'monthly' | 'interval';
+
+export interface Subscription {
+  id: number;
+  name: string;
+  amountCents: number;
+  accountId: number | null;
+  accountName: string | null;
+  accountColor: string | null;
+  categoryId: number | null;
+  categoryName: string | null;
+  categoryColor: string | null;
+  cycle: SubscriptionCycle;
+  billDay: number | null; // monthly: anchor day-of-month (from nextDate)
+  intervalDays: number | null; // interval: days between charges
+  nextDate: string; // YYYY-MM-DD of the next charge
+  active: boolean;
+}
+
+export interface SubscriptionInput {
+  name: string;
+  amountCents: number;
+  accountId: number;
+  categoryId: number | null;
+  cycle: SubscriptionCycle;
+  intervalDays: number | null; // required when cycle = 'interval'
+  nextDate: string; // billDay derives from this server-side for 'monthly'
+  active: boolean;
+}
+
 export interface MonthlySummary {
   month: string; // YYYY-MM
   incomeCents: number;
@@ -212,6 +250,12 @@ export interface Api {
   budgets: {
     list(): Promise<Budget[]>;
     upsert(categoryId: number, cadence: BudgetCadence, amountCents: number): Promise<void>;
+  };
+  subscriptions: {
+    list(): Promise<Subscription[]>;
+    create(data: SubscriptionInput): Promise<Subscription>;
+    update(id: number, data: SubscriptionInput): Promise<void>;
+    remove(id: number): Promise<void>;
   };
   reports: {
     summary(from: string, to: string): Promise<MonthlySummary>;

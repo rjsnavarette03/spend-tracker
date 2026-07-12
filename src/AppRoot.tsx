@@ -14,6 +14,7 @@ import { Dashboard } from './pages/Dashboard';
 import { Landing } from './pages/Landing';
 import { LegalPage } from './pages/Legal';
 import { Settings } from './pages/Settings';
+import { Subscriptions } from './pages/Subscriptions';
 import { Transactions } from './pages/Transactions';
 
 type Phase = 'loading' | 'anon' | 'authed' | 'offline';
@@ -250,6 +251,7 @@ export function AppRoot() {
           <Route path="transactions" element={<TransactionsPage />} />
           <Route path="accounts" element={<AccountsPage />} />
           <Route path="accounts/:id" element={<AccountDetail />} />
+          <Route path="subscriptions" element={<Subscriptions />} />
           <Route path="budgets" element={<BudgetsPage />} />
           <Route path="categories" element={<CategoriesPage />} />
           <Route path="settings" element={<SettingsPage />} />

@@ -15,6 +15,90 @@ function buildFormatter(code: string): Intl.NumberFormat {
   }
 }
 
+// ---------- region-default currency (new signups) ----------
+
+// Currency by home country, limited to the codes offered in Settings so a
+// detected default is always a first-class dropdown choice.
+const REGION_CURRENCY: Record<string, string> = {
+  US: 'USD', PH: 'PHP', GB: 'GBP', JP: 'JPY', AU: 'AUD', CA: 'CAD',
+  SG: 'SGD', HK: 'HKD', IN: 'INR', CN: 'CNY', MY: 'MYR', TH: 'THB',
+  ID: 'IDR', VN: 'VND', KR: 'KRW', AE: 'AED', NZ: 'NZD', CH: 'CHF', TW: 'TWD',
+  // euro area
+  AT: 'EUR', BE: 'EUR', CY: 'EUR', DE: 'EUR', EE: 'EUR', ES: 'EUR',
+  FI: 'EUR', FR: 'EUR', GR: 'EUR', HR: 'EUR', IE: 'EUR', IT: 'EUR',
+  LT: 'EUR', LU: 'EUR', LV: 'EUR', MT: 'EUR', NL: 'EUR', PT: 'EUR',
+  SI: 'EUR', SK: 'EUR',
+};
+
+// Primary IANA zones per supported currency. Checked BEFORE the browser
+// locale: locales often stay factory-set to en-US (very common in PH), while
+// the device timezone tracks where the user actually lives.
+const TZ_CURRENCY: Record<string, string> = {
+  'Asia/Manila': 'PHP',
+  'Europe/London': 'GBP',
+  'Asia/Tokyo': 'JPY',
+  'Asia/Singapore': 'SGD',
+  'Asia/Hong_Kong': 'HKD',
+  'Asia/Kolkata': 'INR', 'Asia/Calcutta': 'INR',
+  'Asia/Shanghai': 'CNY', 'Asia/Urumqi': 'CNY',
+  'Asia/Kuala_Lumpur': 'MYR', 'Asia/Kuching': 'MYR',
+  'Asia/Bangkok': 'THB',
+  'Asia/Jakarta': 'IDR', 'Asia/Pontianak': 'IDR', 'Asia/Makassar': 'IDR', 'Asia/Jayapura': 'IDR',
+  'Asia/Ho_Chi_Minh': 'VND', 'Asia/Saigon': 'VND',
+  'Asia/Seoul': 'KRW',
+  'Asia/Dubai': 'AED',
+  'Pacific/Auckland': 'NZD', 'Pacific/Chatham': 'NZD',
+  'Europe/Zurich': 'CHF',
+  'Asia/Taipei': 'TWD',
+  // Australia
+  'Australia/Sydney': 'AUD', 'Australia/Melbourne': 'AUD', 'Australia/Brisbane': 'AUD',
+  'Australia/Perth': 'AUD', 'Australia/Adelaide': 'AUD', 'Australia/Darwin': 'AUD',
+  'Australia/Hobart': 'AUD', 'Australia/Broken_Hill': 'AUD', 'Australia/Lord_Howe': 'AUD',
+  // United States (America/* can't be prefix-matched — the Americas span
+  // many currencies — so US/CA zones are listed explicitly)
+  'America/New_York': 'USD', 'America/Detroit': 'USD', 'America/Chicago': 'USD',
+  'America/Denver': 'USD', 'America/Phoenix': 'USD', 'America/Boise': 'USD',
+  'America/Los_Angeles': 'USD', 'America/Anchorage': 'USD', 'Pacific/Honolulu': 'USD',
+  // Canada
+  'America/St_Johns': 'CAD', 'America/Halifax': 'CAD', 'America/Moncton': 'CAD',
+  'America/Toronto': 'CAD', 'America/Winnipeg': 'CAD', 'America/Regina': 'CAD',
+  'America/Edmonton': 'CAD', 'America/Vancouver': 'CAD',
+  // euro area (major zones)
+  'Europe/Paris': 'EUR', 'Europe/Berlin': 'EUR', 'Europe/Madrid': 'EUR',
+  'Europe/Rome': 'EUR', 'Europe/Amsterdam': 'EUR', 'Europe/Brussels': 'EUR',
+  'Europe/Vienna': 'EUR', 'Europe/Dublin': 'EUR', 'Europe/Lisbon': 'EUR',
+  'Europe/Helsinki': 'EUR', 'Europe/Athens': 'EUR', 'Europe/Luxembourg': 'EUR',
+  'Europe/Ljubljana': 'EUR', 'Europe/Bratislava': 'EUR', 'Europe/Vilnius': 'EUR',
+  'Europe/Riga': 'EUR', 'Europe/Tallinn': 'EUR', 'Europe/Malta': 'EUR',
+  'Europe/Zagreb': 'EUR', 'Asia/Nicosia': 'EUR',
+};
+
+/**
+ * Best-guess default currency for a NEW account, from the browser's region:
+ * device timezone first, then any explicit region subtag in the language
+ * list (en-PH → PH), else USD. Sent as a hint with register/Google sign-in;
+ * the server falls back to USD on anything unrecognized, and the user can
+ * change it in Settings at any time.
+ */
+export function detectDefaultCurrency(): string {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (tz && TZ_CURRENCY[tz]) return TZ_CURRENCY[tz];
+    for (const lang of navigator.languages ?? []) {
+      // Guard per entry: one malformed tag must not skip later valid ones.
+      try {
+        const region = new Intl.Locale(lang).region;
+        if (region && REGION_CURRENCY[region]) return REGION_CURRENCY[region];
+      } catch {
+        /* non-BCP-47 tag — try the next one */
+      }
+    }
+  } catch {
+    /* Intl quirks — fall through to USD */
+  }
+  return 'USD';
+}
+
 export function setCurrency(code: string): void {
   const next = (code || 'USD').toUpperCase();
   if (next === currencyCode) return;

@@ -209,3 +209,25 @@ export const ShieldIcon = ({ size }: IconProps) => (
     <path d="m9 12 2 2 4-4" />
   </svg>
 );
+
+export const RepeatIcon = ({ size }: IconProps) => (
+  <svg {...base(size)}>
+    <path d="m17 2 4 4-4 4" />
+    <path d="M3 11v-1a4 4 0 0 1 4-4h14" />
+    <path d="m7 22-4-4 4-4" />
+    <path d="M21 13v1a4 4 0 0 1-4 4H3" />
+  </svg>
+);
+
+export const PauseIcon = ({ size }: IconProps) => (
+  <svg {...base(size)}>
+    <rect x="6" y="4" width="4" height="16" rx="1" />
+    <rect x="14" y="4" width="4" height="16" rx="1" />
+  </svg>
+);
+
+export const PlayIcon = ({ size }: IconProps) => (
+  <svg {...base(size)}>
+    <polygon points="6 3 20 12 6 21 6 3" />
+  </svg>
+);

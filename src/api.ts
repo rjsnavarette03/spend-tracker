@@ -4,13 +4,14 @@ import type {
   AuthResponse,
   BudgetCadence,
   MeResponse,
+  SubscriptionInput,
   TransferInput,
   TxFilter,
   TxInput,
   TxType,
   User,
 } from '../shared/types';
-import { setCurrency as applyCurrency } from './format';
+import { detectDefaultCurrency, setCurrency as applyCurrency } from './format';
 
 // CSRF token for mutating requests; refreshed on me/login/register/google.
 let csrfToken = '';
@@ -81,7 +82,13 @@ export const api: Api = {
       return r;
     },
     register: async (email, password, name) => {
-      const r = await http<AuthResponse>('POST', '/auth/register', { email, password, name });
+      const r = await http<AuthResponse>('POST', '/auth/register', {
+        email,
+        password,
+        name,
+        // Region-detected default; the server sanitizes (falls back to USD).
+        currency: detectDefaultCurrency(),
+      });
       setCsrf(r.csrf);
       syncCurrency(r.user);
       return r;
@@ -93,7 +100,12 @@ export const api: Api = {
       return r;
     },
     google: async (credential) => {
-      const r = await http<AuthResponse>('POST', '/auth/google', { credential });
+      // The currency hint only matters on FIRST sign-in (account creation);
+      // the server ignores it for existing accounts.
+      const r = await http<AuthResponse>('POST', '/auth/google', {
+        credential,
+        currency: detectDefaultCurrency(),
+      });
       setCsrf(r.csrf);
       syncCurrency(r.user);
       return r;
@@ -199,6 +211,12 @@ export const api: Api = {
     list: () => http('GET', '/budgets'),
     upsert: (categoryId: number, cadence: BudgetCadence, amountCents: number) =>
       http('PUT', '/budgets', { categoryId, cadence, amountCents }),
+  },
+  subscriptions: {
+    list: () => http('GET', '/subscriptions'),
+    create: (data: SubscriptionInput) => http('POST', '/subscriptions', data),
+    update: (id: number, data: SubscriptionInput) => http('PUT', `/subscriptions/${id}`, data),
+    remove: (id: number) => http('DELETE', `/subscriptions/${id}`),
   },
   reports: {
     summary: (from: string, to: string) => http('GET', `/reports/summary${qs({ from, to })}`),

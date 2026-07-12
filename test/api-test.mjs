@@ -794,6 +794,220 @@ let bankId = 0;
   check('login throttling kicks in (429)', got429);
 }
 
+// ---------- subscriptions (recurring auto-charges) ----------
+{
+  const iso = (d) => {
+    const x = new Date(d);
+    return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+  };
+  const today = new Date();
+  const todayIso = iso(today);
+  const daysAgo = (n) => iso(new Date(today.getFullYear(), today.getMonth(), today.getDate() - n));
+
+  const s = new Client();
+  await s.call('GET', '/auth/me').then((r) => (s.csrf = r.data.csrf));
+  const email = `subs.${suffix}@test.local`;
+  const reg = await s.call('POST', '/auth/register', { email, password, name: 'Subs' });
+  s.csrf = reg.data.csrf;
+  await verifyClient(s, email);
+
+  const acct = (await s.call('POST', '/accounts', {
+    name: 'Sub Wallet', type: 'debit', color: '#38bdf8', image: null,
+    dueDay: null, dueDay2: null, openingBalanceCents: 100000,
+  })).data;
+  const loanAcct = (await s.call('POST', '/accounts', {
+    name: 'Sub Loan', type: 'loan', color: '#ef4444', image: null,
+    dueDay: null, dueDay2: null, openingBalanceCents: -5000,
+  })).data;
+  const cat = (await s.call('POST', '/categories', {
+    name: 'Streaming', type: 'expense', color: '#8b5cf6',
+  })).data;
+
+  // validation
+  const badCycle = await s.call('POST', '/subscriptions', {
+    name: 'X', amountCents: 100, accountId: acct.id, categoryId: null,
+    cycle: 'weekly', intervalDays: null, nextDate: todayIso, active: true,
+  });
+  check('subscription with bad cycle -> 422', badCycle.status === 422, `got ${badCycle.status}`);
+  const noDays = await s.call('POST', '/subscriptions', {
+    name: 'X', amountCents: 100, accountId: acct.id, categoryId: null,
+    cycle: 'interval', intervalDays: null, nextDate: todayIso, active: true,
+  });
+  check('interval subscription without days -> 422', noDays.status === 422, `got ${noDays.status}`);
+  const onLoan = await s.call('POST', '/subscriptions', {
+    name: 'X', amountCents: 100, accountId: loanAcct.id, categoryId: null,
+    cycle: 'monthly', intervalDays: null, nextDate: todayIso, active: true,
+  });
+  check('subscription on a loan account -> 422', onLoan.status === 422, `got ${onLoan.status}`);
+  const ghostAcct = await s.call('POST', '/subscriptions', {
+    name: 'X', amountCents: 100, accountId: 99999999, categoryId: null,
+    cycle: 'monthly', intervalDays: null, nextDate: todayIso, active: true,
+  });
+  check('subscription on unknown account -> 422', ghostAcct.status === 422, `got ${ghostAcct.status}`);
+
+  // monthly sub due today: created now, auto-charged by the NEXT request
+  const net = (await s.call('POST', '/subscriptions', {
+    name: 'Netflix', amountCents: 54900, accountId: acct.id, categoryId: cat.id,
+    cycle: 'monthly', intervalDays: null, nextDate: todayIso, active: true,
+  })).data;
+  check(
+    'monthly subscription created; billDay = nextDate day',
+    net?.id > 0 && net.cycle === 'monthly' && net.billDay === today.getDate() && net.nextDate === todayIso,
+    JSON.stringify(net)
+  );
+
+  const txAfter = await s.call('GET', '/transactions', undefined);
+  const charge = (txAfter.data ?? []).find((t) => t.note === 'Netflix (subscription)');
+  check(
+    'due subscription auto-charged an expense on the linked account',
+    charge && charge.type === 'expense' && charge.amountCents === 54900 &&
+      charge.accountId === acct.id && charge.categoryId === cat.id && charge.date === todayIso,
+    JSON.stringify(charge ?? txAfter.data)
+  );
+
+  const subsNow = (await s.call('GET', '/subscriptions')).data;
+  const netNow = subsNow.find((x) => x.id === net.id);
+  check(
+    'charged subscription advanced nextDate into the future, anchor kept',
+    netNow && netNow.nextDate > todayIso && netNow.billDay === today.getDate(),
+    JSON.stringify(netNow)
+  );
+
+  const acctNow = (await s.call('GET', '/accounts')).data.find((a) => a.id === acct.id);
+  check(
+    'account balance dropped by the charge',
+    acctNow?.balanceCents === 100000 - 54900,
+    `got ${acctNow?.balanceCents}`
+  );
+
+  // interval sub 65 days behind catches up: 3 charges (t-65, t-35, t-5), next t+25
+  const prepaid = (await s.call('POST', '/subscriptions', {
+    name: 'Prepaid Wifi', amountCents: 1000, accountId: acct.id, categoryId: null,
+    cycle: 'interval', intervalDays: 30, nextDate: daysAgo(65), active: true,
+  })).data;
+  await s.call('GET', '/subscriptions'); // triggers processing
+  const wifiTxs = (await s.call('GET', '/transactions')).data.filter(
+    (t) => t.note === 'Prepaid Wifi (subscription)'
+  );
+  const prepaidNow = (await s.call('GET', '/subscriptions')).data.find((x) => x.id === prepaid.id);
+  check(
+    'interval sub 65 days behind catches up with 3 dated charges',
+    wifiTxs.length === 3 &&
+      wifiTxs.some((t) => t.date === daysAgo(65)) &&
+      wifiTxs.some((t) => t.date === daysAgo(35)) &&
+      wifiTxs.some((t) => t.date === daysAgo(5)),
+    JSON.stringify(wifiTxs.map((t) => t.date))
+  );
+  check(
+    'caught-up interval sub lands 25 days ahead',
+    prepaidNow?.nextDate === iso(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 25)),
+    `got ${prepaidNow?.nextDate}`
+  );
+
+  // paused subs never charge; resuming does NOT back-charge the paused stretch
+  const gym = (await s.call('POST', '/subscriptions', {
+    name: 'Gym', amountCents: 2000, accountId: acct.id, categoryId: null,
+    cycle: 'monthly', intervalDays: null, nextDate: daysAgo(40), active: false,
+  })).data;
+  await s.call('GET', '/subscriptions');
+  let gymTxs = (await s.call('GET', '/transactions')).data.filter(
+    (t) => t.note === 'Gym (subscription)'
+  );
+  check('paused subscription never charges', gymTxs.length === 0, `got ${gymTxs.length}`);
+
+  const resume = await s.call('PUT', `/subscriptions/${gym.id}`, {
+    name: 'Gym', amountCents: 2000, accountId: acct.id, categoryId: null,
+    cycle: 'monthly', intervalDays: null, nextDate: daysAgo(40), active: true,
+  });
+  const gymNow = (await s.call('GET', '/subscriptions')).data.find((x) => x.id === gym.id);
+  gymTxs = (await s.call('GET', '/transactions')).data.filter(
+    (t) => t.note === 'Gym (subscription)'
+  );
+  check(
+    'resume rolls nextDate forward without back-charging',
+    resume.status === 200 && gymTxs.length === 0 && gymNow?.nextDate >= todayIso && gymNow?.active === true,
+    `status ${resume.status}, txs ${gymTxs.length}, next ${gymNow?.nextDate}`
+  );
+
+  // deleting the linked account pauses charging (accountId -> null)
+  const tmpAcct = (await s.call('POST', '/accounts', {
+    name: 'Doomed', type: 'debit', color: '#22c55e', image: null,
+    dueDay: null, dueDay2: null, openingBalanceCents: 50000,
+  })).data;
+  const orphan = (await s.call('POST', '/subscriptions', {
+    name: 'Orphan', amountCents: 500, accountId: tmpAcct.id, categoryId: null,
+    cycle: 'monthly', intervalDays: null, nextDate: todayIso, active: true,
+  })).data;
+  // The DELETE request itself first processes dues (sub still linked, due
+  // today -> one legitimate charge), THEN deletes the account, which unlinks
+  // the sub (accountId null). After that, repeated requests add nothing.
+  await s.call('DELETE', `/accounts/${tmpAcct.id}`);
+  await s.call('GET', '/subscriptions');
+  const orphanNow = (await s.call('GET', '/subscriptions')).data.find((x) => x.id === orphan.id);
+  const orphanTxs = (await s.call('GET', '/transactions')).data.filter(
+    (t) => t.note === 'Orphan (subscription)'
+  );
+  check(
+    'deleting the linked account unlinks the sub; no further charges',
+    orphanNow?.accountId === null && orphanTxs.length === 1,
+    JSON.stringify({ acct: orphanNow?.accountId, txs: orphanTxs.length })
+  );
+
+  // cross-user isolation
+  const other = new Client();
+  await other.call('GET', '/auth/me').then((r) => (other.csrf = r.data.csrf));
+  const otherEmail = `subs2.${suffix}@test.local`;
+  const oReg = await other.call('POST', '/auth/register', { email: otherEmail, password, name: 'Subs2' });
+  other.csrf = oReg.data.csrf;
+  await verifyClient(other, otherEmail);
+  const otherList = await other.call('GET', '/subscriptions');
+  check('other user sees no foreign subscriptions', otherList.data?.length === 0, JSON.stringify(otherList.data));
+  const foreignAcct = await other.call('POST', '/subscriptions', {
+    name: 'Steal', amountCents: 100, accountId: acct.id, categoryId: null,
+    cycle: 'monthly', intervalDays: null, nextDate: todayIso, active: true,
+  });
+  check("subscription on another user's account -> 422", foreignAcct.status === 422, `got ${foreignAcct.status}`);
+  const foreignDel = await other.call('DELETE', `/subscriptions/${net.id}`);
+  check("deleting another user's subscription -> 404", foreignDel.status === 404, `got ${foreignDel.status}`);
+
+  // REGRESSION: a stale client echoing back an already-charged nextDate must
+  // NOT rewind it into charged territory (would double-charge the cycle).
+  // Netflix charged today; PUT the original (stale) nextDate = today back.
+  const staleEcho = await s.call('PUT', `/subscriptions/${net.id}`, {
+    name: 'Netflix', amountCents: 54900, accountId: acct.id, categoryId: cat.id,
+    cycle: 'monthly', intervalDays: null, nextDate: todayIso, active: true,
+  });
+  await s.call('GET', '/subscriptions'); // would double-charge if rewound
+  const netAfterEcho = (await s.call('GET', '/subscriptions')).data.find((x) => x.id === net.id);
+  const netCharges = (await s.call('GET', '/transactions')).data.filter(
+    (t) => t.note === 'Netflix (subscription)'
+  );
+  check(
+    'stale-client nextDate echo cannot rewind into charged territory (no double charge)',
+    staleEcho.status === 200 && netCharges.length === 1 && netAfterEcho?.nextDate > todayIso,
+    `status ${staleEcho.status}, charges ${netCharges.length}, next ${netAfterEcho?.nextDate}`
+  );
+
+  // anti-flood: a first charge date years in the past is rejected
+  const ancient = await s.call('POST', '/subscriptions', {
+    name: 'Ancient', amountCents: 100, accountId: acct.id, categoryId: null,
+    cycle: 'interval', intervalDays: 1, nextDate: '2019-01-01', active: true,
+  });
+  check('subscription years in the past -> 422', ancient.status === 422, `got ${ancient.status}`);
+
+  // delete: future charges stop, history stays
+  const del = await s.call('DELETE', `/subscriptions/${net.id}`);
+  const delAgain = await s.call('DELETE', `/subscriptions/${net.id}`);
+  const historyTx = (await s.call('GET', '/transactions')).data.find(
+    (t) => t.note === 'Netflix (subscription)'
+  );
+  check(
+    'delete subscription -> ok, repeat -> 404, past charges kept',
+    del.status === 200 && delAgain.status === 404 && historyTx !== undefined,
+    `del ${del.status}, again ${delAgain.status}`
+  );
+}
+
 // ---------- currency preference ----------
 {
   const c = new Client();
@@ -822,6 +1036,30 @@ let bankId = 0;
   await anon.call('GET', '/auth/me').then((r) => (anon.csrf = r.data.csrf));
   const noAuth = await anon.call('POST', '/auth/currency', { currency: 'PHP' });
   check('currency change requires auth -> 401', noAuth.status === 401, `got ${noAuth.status}`);
+
+  // Region-detected default: register accepts an optional currency HINT.
+  // It is sanitized, not validated — junk falls back to USD, never a 4xx.
+  const h = new Client();
+  await h.call('GET', '/auth/me').then((r) => (h.csrf = r.data.csrf));
+  const hinted = await h.call('POST', '/auth/register', {
+    email: `hint.${suffix}@test.local`, password, name: 'Hint', currency: 'php',
+  });
+  check(
+    'register currency hint applied + normalized (php -> PHP)',
+    hinted.status === 200 && hinted.data.user?.currency === 'PHP',
+    JSON.stringify(hinted.data.user)
+  );
+
+  const j = new Client();
+  await j.call('GET', '/auth/me').then((r) => (j.csrf = r.data.csrf));
+  const junkHint = await j.call('POST', '/auth/register', {
+    email: `hintbad.${suffix}@test.local`, password, name: 'HintBad', currency: 'U$D',
+  });
+  check(
+    'register with junk currency hint still succeeds as USD',
+    junkHint.status === 200 && junkHint.data.user?.currency === 'USD',
+    `status ${junkHint.status} ${JSON.stringify(junkHint.data.user)}`
+  );
 }
 
 // ---------- change password (authenticated) ----------

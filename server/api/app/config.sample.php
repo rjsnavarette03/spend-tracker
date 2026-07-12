@@ -32,6 +32,10 @@ return [
     // test suite). Leave unset/absent in production.
     // 'mail_log_file' => __DIR__ . '/maillog.txt',
 
+    // Timezone for server-side "today" (subscription charge days, budget
+    // periods). Set to your user base's zone; defaults to UTC when absent.
+    'timezone' => 'Asia/Manila',
+
     // Session cookie name (no need to change).
     'session_name' => 'spendtracker_sid',
 ];

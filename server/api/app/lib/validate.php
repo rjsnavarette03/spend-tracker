@@ -148,6 +148,30 @@ final class Validate
         return $c;
     }
 
+    /** Subscription billing cycle: same date monthly, or every N days. */
+    public static function subCycle(mixed $c): string
+    {
+        if ($c !== 'monthly' && $c !== 'interval') {
+            throw new ApiError('Invalid billing cycle', 422);
+        }
+        return $c;
+    }
+
+    /** Days between charges for every-N-days subscriptions (1–365). */
+    public static function intervalDays(mixed $v): int
+    {
+        if (is_string($v) && ctype_digit($v)) {
+            $v = (int)$v;
+        }
+        if (is_float($v) && floor($v) === $v) {
+            $v = (int)$v;
+        }
+        if (!is_int($v) || $v < 1 || $v > 365) {
+            throw new ApiError('Days between charges must be between 1 and 365', 422);
+        }
+        return $v;
+    }
+
     /**
      * Optional custom account image, stored inline as a base64 data URI.
      * null / '' means "no image" (the account falls back to its color).

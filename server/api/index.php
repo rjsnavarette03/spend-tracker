@@ -28,6 +28,14 @@ if (!is_file($configFile)) {
 /** @var array<string, mixed> $config */
 $config = require $configFile;
 
+// Pin the timezone so "today" (subscription charge days, budget periods) is
+// deterministic instead of inheriting whatever the host's php.ini says. Set
+// 'timezone' in config.php to the user base's zone (e.g. 'Asia/Manila').
+$tz = (string)($config['timezone'] ?? 'UTC');
+if (!@date_default_timezone_set($tz)) {
+    date_default_timezone_set('UTC');
+}
+
 try {
     Http::init($config);
     DB::init((array)$config['db']);
@@ -75,7 +83,7 @@ try {
         }
         if ($method === 'POST' && $sub === 'register') {
             $b = Http::readJson();
-            $user = Auth::register($b['email'] ?? null, $b['password'] ?? null, $b['name'] ?? '');
+            $user = Auth::register($b['email'] ?? null, $b['password'] ?? null, $b['name'] ?? '', $b['currency'] ?? null);
             Http::json(['user' => $user, 'csrf' => $_SESSION['csrf']]);
         }
         if ($method === 'POST' && $sub === 'login') {
@@ -85,7 +93,7 @@ try {
         }
         if ($method === 'POST' && $sub === 'google') {
             $b = Http::readJson();
-            $user = Auth::googleSignIn($b['credential'] ?? null, $googleClientId);
+            $user = Auth::googleSignIn($b['credential'] ?? null, $googleClientId, $b['currency'] ?? null);
             Http::json(['user' => $user, 'csrf' => $_SESSION['csrf']]);
         }
         if ($method === 'POST' && $sub === 'logout') {
@@ -147,6 +155,12 @@ try {
     // logout, change-password — but no data.)
     $uid = Auth::requireVerifiedUser();
 
+    // Auto-charge any subscriptions that came due, BEFORE handling the
+    // request, so every list/report/balance already reflects the charges.
+    // (Shared hosting has no reliable cron; charges post on the next visit
+    // but are dated their actual due date, so history stays exact.)
+    Repo::processDueSubscriptions($uid);
+
     // ---------- categories ----------
     if ($resource === 'categories') {
         if ($method === 'GET' && $sub === '') {
@@ -188,6 +202,25 @@ try {
         }
         if ($method === 'DELETE' && $sub !== '') {
             Repo::deleteAccount($uid, Validate::intId($sub));
+            Http::json(['ok' => true]);
+        }
+        throw new ApiError('Not found', 404);
+    }
+
+    // ---------- subscriptions ----------
+    if ($resource === 'subscriptions') {
+        if ($method === 'GET' && $sub === '') {
+            Http::json(Repo::listSubscriptions($uid));
+        }
+        if ($method === 'POST' && $sub === '') {
+            Http::json(Repo::createSubscription($uid, Http::readJson()), 201);
+        }
+        if ($method === 'PUT' && $sub !== '') {
+            Repo::updateSubscription($uid, Validate::intId($sub), Http::readJson());
+            Http::json(['ok' => true]);
+        }
+        if ($method === 'DELETE' && $sub !== '') {
+            Repo::deleteSubscription($uid, Validate::intId($sub));
             Http::json(['ok' => true]);
         }
         throw new ApiError('Not found', 404);

@@ -8,6 +8,7 @@ import {
   DashboardIcon,
   ListIcon,
   LogoutIcon,
+  RepeatIcon,
   SettingsIcon,
   TagIcon,
   TargetIcon,
@@ -36,10 +37,12 @@ export function useAppContext(): AppContext {
   return useOutletContext<AppContext>();
 }
 
-const NAV: Array<{ to: string; label: string; icon: JSX.Element }> = [
+// shortLabel: fits the 6-tab mobile tab bar; the sidebar shows the full label.
+const NAV: Array<{ to: string; label: string; shortLabel?: string; icon: JSX.Element }> = [
   { to: '/dashboard', label: 'Dashboard', icon: <DashboardIcon /> },
   { to: '/transactions', label: 'Transactions', icon: <ListIcon /> },
   { to: '/accounts', label: 'Accounts', icon: <BankIcon /> },
+  { to: '/subscriptions', label: 'Subscriptions', shortLabel: 'Subs', icon: <RepeatIcon /> },
   { to: '/budgets', label: 'Budgets', icon: <TargetIcon /> },
   { to: '/categories', label: 'Categories', icon: <TagIcon /> },
 ];
@@ -202,7 +205,7 @@ export default function AppLayout({ user, onLogout }: { user: User; onLogout: ()
             className={({ isActive }) => `tab-item ${isActive ? 'active' : ''}`}
           >
             {item.icon}
-            <span className="tab-label">{item.label}</span>
+            <span className="tab-label">{item.shortLabel ?? item.label}</span>
           </NavLink>
         ))}
       </nav>

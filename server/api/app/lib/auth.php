@@ -77,6 +77,18 @@ final class Auth
         return $currency;
     }
 
+    /**
+     * Sanitize the client's region-detected currency HINT sent with signup.
+     * Unlike Validate::currency this never throws — a bad or missing hint
+     * must not block a registration — it just falls back to USD.
+     */
+    private static function currencyHint(mixed $raw): string
+    {
+        return is_string($raw) && preg_match('/^[A-Za-z]{3}$/', $raw) === 1
+            ? strtoupper($raw)
+            : 'USD';
+    }
+
     private static function establishSession(int $userId): void
     {
         session_regenerate_id(true);
@@ -85,7 +97,7 @@ final class Auth
     }
 
     /** @return array<string, mixed> */
-    public static function register(mixed $email, mixed $password, mixed $name): array
+    public static function register(mixed $email, mixed $password, mixed $name, mixed $currency = null): array
     {
         Http::throttle('register:' . Http::clientIp(), 20, 3600);
 
@@ -106,7 +118,10 @@ final class Auth
         $hash = password_hash($password, PASSWORD_DEFAULT);
         // email_verified = 0: new email/password accounts must verify. (The
         // column DEFAULTs to 1, so this explicit 0 is what gates them.)
-        $uid = DB::insert('INSERT INTO users (email, password_hash, name, email_verified) VALUES (?, ?, ?, 0)', [$email, $hash, $name]);
+        $uid = DB::insert(
+            'INSERT INTO users (email, password_hash, name, email_verified, currency) VALUES (?, ?, ?, 0, ?)',
+            [$email, $hash, $name, self::currencyHint($currency)]
+        );
         Repo::seedDefaultCategories($uid);
         self::issueEmailVerification($uid, $email);
         self::establishSession($uid);
@@ -142,7 +157,7 @@ final class Auth
     }
 
     /** @return array<string, mixed> */
-    public static function googleSignIn(mixed $credential, string $clientId): array
+    public static function googleSignIn(mixed $credential, string $clientId, mixed $currency = null): array
     {
         if ($clientId === '') {
             throw new ApiError('Google sign-in is not configured on this server', 400);
@@ -166,9 +181,11 @@ final class Auth
                 DB::exec('UPDATE users SET google_sub = ?, email_verified = 1 WHERE id = ?', [$sub, (int)$byEmail['id']]);
                 $u = DB::one('SELECT * FROM users WHERE id = ?', [(int)$byEmail['id']]);
             } else {
+                // First Google sign-in creates the account, so the region
+                // hint applies here too. Existing accounts keep their choice.
                 $uid = DB::insert(
-                    'INSERT INTO users (email, google_sub, name) VALUES (?, ?, ?)',
-                    [$email, $sub, $name]
+                    'INSERT INTO users (email, google_sub, name, currency) VALUES (?, ?, ?, ?)',
+                    [$email, $sub, $name, self::currencyHint($currency)]
                 );
                 Repo::seedDefaultCategories($uid);
                 $u = DB::one('SELECT * FROM users WHERE id = ?', [$uid]);

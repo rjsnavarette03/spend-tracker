@@ -740,4 +740,266 @@ final class Repo
         );
         return array_map(static fn(array $r): int => (int)$r['y'], $rows);
     }
+
+    // ---------- subscriptions ----------
+
+    private const SUB_SELECT =
+        'SELECT s.id, s.account_id AS accountId, s.category_id AS categoryId, s.name,
+                s.amount_cents AS amountCents, s.cycle, s.bill_day AS billDay,
+                s.interval_days AS intervalDays, s.next_date AS nextDate, s.active,
+                a.name AS accountName, a.color AS accountColor,
+                c.name AS categoryName, c.color AS categoryColor
+         FROM subscriptions s
+         LEFT JOIN accounts a ON a.id = s.account_id
+         LEFT JOIN categories c ON c.id = s.category_id';
+
+    /** @return array<int, array<string, mixed>> */
+    public static function listSubscriptions(int $uid): array
+    {
+        $rows = DB::all(
+            self::SUB_SELECT . ' WHERE s.user_id = ? ORDER BY s.next_date ASC, s.id ASC',
+            [$uid]
+        );
+        return array_map([self::class, 'castSubscription'], $rows);
+    }
+
+    /**
+     * @param array<string, mixed> $r
+     * @return array<string, mixed>
+     */
+    private static function castSubscription(array $r): array
+    {
+        return [
+            'id' => (int)$r['id'],
+            'name' => (string)$r['name'],
+            'amountCents' => (int)$r['amountCents'],
+            'accountId' => $r['accountId'] === null ? null : (int)$r['accountId'],
+            'accountName' => $r['accountName'] === null ? null : (string)$r['accountName'],
+            'accountColor' => $r['accountColor'] === null ? null : (string)$r['accountColor'],
+            'categoryId' => $r['categoryId'] === null ? null : (int)$r['categoryId'],
+            'categoryName' => $r['categoryName'] === null ? null : (string)$r['categoryName'],
+            'categoryColor' => $r['categoryColor'] === null ? null : (string)$r['categoryColor'],
+            'cycle' => (string)$r['cycle'],
+            'billDay' => $r['billDay'] === null ? null : (int)$r['billDay'],
+            'intervalDays' => $r['intervalDays'] === null ? null : (int)$r['intervalDays'],
+            'nextDate' => (string)$r['nextDate'],
+            'active' => (int)$r['active'] === 1,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return array{0: string, 1: int, 2: int, 3: ?int, 4: string, 5: ?int, 6: ?int, 7: string, 8: bool}
+     *         name, amount, accountId, categoryId, cycle, billDay, intervalDays, nextDate, active
+     */
+    private static function cleanSubInput(int $uid, array $data): array
+    {
+        $name = Validate::name($data['name'] ?? null);
+        $amount = Validate::amountCents($data['amountCents'] ?? null);
+        $accountId = Validate::intId($data['accountId'] ?? null);
+        self::assertChargeableAccount($uid, $accountId);
+        $categoryId = Validate::categoryIdOrNull($data['categoryId'] ?? null);
+        if ($categoryId !== null) {
+            // Charges are expenses, so only expense categories make sense.
+            self::assertCategoryOwned($uid, $categoryId, 'expense');
+        }
+        $cycle = Validate::subCycle($data['cycle'] ?? null);
+        $nextDate = Validate::date($data['nextDate'] ?? null);
+        // Monthly: the chosen next-charge date's day-of-month is the anchor
+        // every later month re-lands on. Storing it separately keeps a
+        // "31st" subscription on the 31st after clamping through February.
+        $billDay = $cycle === 'monthly' ? (int)substr($nextDate, 8, 2) : null;
+        $intervalDays = $cycle === 'interval' ? Validate::intervalDays($data['intervalDays'] ?? null) : null;
+        $active = !array_key_exists('active', $data) || (bool)$data['active'];
+        return [$name, $amount, $accountId, $categoryId, $cycle, $billDay, $intervalDays, $nextDate, $active];
+    }
+
+    /** Loans can't be charged — they have no spendable balance to deduct. */
+    private static function assertChargeableAccount(int $uid, int $accountId): void
+    {
+        $a = DB::one('SELECT type FROM accounts WHERE id = ? AND user_id = ?', [$accountId, $uid]);
+        if ($a === null) {
+            throw new ApiError('Invalid account', 422);
+        }
+        if ((string)$a['type'] === 'loan') {
+            throw new ApiError('Subscriptions must charge a debit or credit account', 422);
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return array<string, mixed>
+     */
+    public static function createSubscription(int $uid, array $data): array
+    {
+        [$name, $amount, $accountId, $categoryId, $cycle, $billDay, $intervalDays, $nextDate, $active] =
+            self::cleanSubInput($uid, $data);
+        // Past first-charge dates are allowed (catch-up backfills the missed
+        // cycles as dated charges), but bounded: an ancient date + short
+        // interval would schedule hundreds of thousands of catch-up writes
+        // into the per-request processing hook.
+        if ($nextDate < date('Y-m-d', strtotime('-2 years'))) {
+            throw new ApiError('Next charge date is too far in the past', 422);
+        }
+        $id = DB::insert(
+            'INSERT INTO subscriptions (user_id, account_id, category_id, name, amount_cents, cycle, bill_day, interval_days, next_date, active)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [$uid, $accountId, $categoryId, $name, $amount, $cycle, $billDay, $intervalDays, $nextDate, $active ? 1 : 0]
+        );
+        $row = DB::one(self::SUB_SELECT . ' WHERE s.id = ? AND s.user_id = ?', [$id, $uid]);
+        assert($row !== null);
+        return self::castSubscription($row);
+    }
+
+    /** @param array<string, mixed> $data */
+    public static function updateSubscription(int $uid, int $id, array $data): void
+    {
+        [$name, $amount, $accountId, $categoryId, $cycle, $billDay, $intervalDays, $nextDate, $active] =
+            self::cleanSubInput($uid, $data);
+        $existing = DB::one(
+            'SELECT cycle, bill_day, next_date, charged_through FROM subscriptions WHERE id = ? AND user_id = ?',
+            [$id, $uid]
+        );
+        if ($existing === null) {
+            throw new ApiError('Subscription not found', 404);
+        }
+        // Editing without touching the date must not lose the monthly anchor:
+        // a "31st" sub whose next_date currently reads Feb 28 (clamped) would
+        // otherwise get its bill_day re-derived as 28.
+        if (
+            $cycle === 'monthly' && (string)$existing['cycle'] === 'monthly'
+            && $nextDate === (string)$existing['next_date'] && $existing['bill_day'] !== null
+        ) {
+            $billDay = (int)$existing['bill_day'];
+        }
+        // next_date may never re-enter charged territory. A client whose list
+        // went stale (overnight tab, second device) echoes back the OLD
+        // next_date after the server already charged that day — writing it
+        // would make the next request charge the same cycle twice.
+        $chargedThrough = $existing['charged_through'] === null ? null : (string)$existing['charged_through'];
+        if ($chargedThrough !== null) {
+            for ($i = 0; $nextDate <= $chargedThrough && $i < 1000; $i++) {
+                $nextDate = self::advanceSubDate($nextDate, $cycle, $billDay, $intervalDays);
+            }
+            if ($nextDate <= $chargedThrough) {
+                throw new ApiError('Next charge date is too far in the past', 422);
+            }
+        }
+        // Re-activating (or relinking an account) with a stale next_date must
+        // not back-charge the paused stretch — a Netflix paused for 4 months
+        // isn't 4 charges behind. Roll forward to the first occurrence that
+        // isn't in the past. (Active subs are normally already >= today here:
+        // processDueSubscriptions runs before every request.)
+        if ($active) {
+            $today = date('Y-m-d');
+            for ($i = 0; $nextDate < $today && $i < 20000; $i++) {
+                $nextDate = self::advanceSubDate($nextDate, $cycle, $billDay, $intervalDays);
+            }
+            if ($nextDate < $today) {
+                throw new ApiError('Next charge date is too far in the past', 422);
+            }
+        }
+        DB::exec(
+            'UPDATE subscriptions SET account_id = ?, category_id = ?, name = ?, amount_cents = ?, cycle = ?, bill_day = ?, interval_days = ?, next_date = ?, active = ?
+             WHERE id = ? AND user_id = ?',
+            [$accountId, $categoryId, $name, $amount, $cycle, $billDay, $intervalDays, $nextDate, $active ? 1 : 0, $id, $uid]
+        );
+    }
+
+    public static function deleteSubscription(int $uid, int $id): void
+    {
+        // Past charges are ordinary transactions and stay in history.
+        $count = DB::exec('DELETE FROM subscriptions WHERE id = ? AND user_id = ?', [$id, $uid]);
+        if ($count === 0) {
+            throw new ApiError('Subscription not found', 404);
+        }
+    }
+
+    /**
+     * Auto-charging. For every active, account-linked subscription whose
+     * next_date has arrived, insert the expense (dated the DUE date, not
+     * today) and advance next_date one cycle — looping so several missed
+     * cycles catch up (capped). Runs on every authenticated data request
+     * (cheap indexed SELECT when nothing is due). The conditional UPDATE
+     * claims each cycle atomically, so two concurrent requests can never
+     * double-charge: only the request that actually advanced next_date
+     * inserts the transaction.
+     */
+    public static function processDueSubscriptions(int $uid): void
+    {
+        $today = date('Y-m-d');
+        $dues = DB::all(
+            'SELECT id, account_id, category_id, name, amount_cents, cycle, bill_day, interval_days, next_date
+             FROM subscriptions
+             WHERE user_id = ? AND active = 1 AND account_id IS NOT NULL AND next_date <= ?',
+            [$uid, $today]
+        );
+        $pdo = DB::pdo();
+        foreach ($dues as $s) {
+            $next = (string)$s['next_date'];
+            for ($i = 0; $next <= $today && $i < 60; $i++) {
+                $newNext = self::advanceSubDate(
+                    $next,
+                    (string)$s['cycle'],
+                    $s['bill_day'] === null ? null : (int)$s['bill_day'],
+                    $s['interval_days'] === null ? null : (int)$s['interval_days']
+                );
+                // Claim + insert are one atomic unit: a crash or a failed
+                // insert (e.g. the account/category was deleted by a parallel
+                // request after our SELECT) rolls the claim back, so the cycle
+                // is retried cleanly on the next request instead of being
+                // silently lost. Failures also must not 500 the request that
+                // merely triggered processing — skip the sub and move on.
+                $pdo->beginTransaction();
+                try {
+                    $claimed = DB::exec(
+                        'UPDATE subscriptions SET next_date = ?, charged_through = ? WHERE id = ? AND next_date = ?',
+                        [$newNext, $next, (int)$s['id'], $next]
+                    );
+                    if ($claimed === 0) {
+                        $pdo->rollBack();
+                        break; // another request already charged this cycle
+                    }
+                    DB::insert(
+                        'INSERT INTO transactions (user_id, amount_cents, type, category_id, account_id, date, note)
+                         VALUES (?, ?, ?, ?, ?, ?, ?)',
+                        [
+                            $uid,
+                            (int)$s['amount_cents'],
+                            'expense',
+                            $s['category_id'] === null ? null : (int)$s['category_id'],
+                            (int)$s['account_id'],
+                            $next,
+                            (string)$s['name'] . ' (subscription)',
+                        ]
+                    );
+                    $pdo->commit();
+                } catch (Throwable) {
+                    if ($pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    break;
+                }
+                $next = $newNext;
+            }
+        }
+    }
+
+    /** One billing cycle after $date. Monthly re-lands on bill_day, clamped to short months. */
+    private static function advanceSubDate(string $date, string $cycle, ?int $billDay, ?int $intervalDays): string
+    {
+        [$y, $m, $d] = array_map('intval', explode('-', $date));
+        if ($cycle === 'interval') {
+            // mktime normalizes day overflow into the following month(s).
+            return date('Y-m-d', (int)mktime(12, 0, 0, $m, $d + max(1, (int)$intervalDays), $y));
+        }
+        $m += 1;
+        if ($m > 12) {
+            $m = 1;
+            $y += 1;
+        }
+        $anchor = $billDay ?? $d;
+        $lastDay = (int)date('t', (int)mktime(12, 0, 0, $m, 1, $y));
+        return sprintf('%04d-%02d-%02d', $y, $m, min($anchor, $lastDay));
+    }
 }

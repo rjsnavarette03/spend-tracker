@@ -69,7 +69,7 @@ final class DB
      * Auto-migrate on first use. Idempotent and self-healing — safe to run on
      * every connection, under concurrency, and after a partially-applied
      * upgrade (see tryDdl).
-     *   1. If the newest table (`email_verifications`) is missing, replay the
+     *   1. If the newest table (`subscriptions`) is missing, replay the
      *      full dialect schema (all CREATE ... IF NOT EXISTS — data preserved).
      *   2. Add columns that CREATE IF NOT EXISTS can't express — currently
      *      transactions.account_id, driven off the artifact that is created
@@ -81,10 +81,10 @@ final class DB
         $driver = (string)self::$pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
 
         // Step 1: create any missing tables. Probe the newest table
-        // (email_verifications); if it's absent, replay the whole schema.
+        // (subscriptions); if it's absent, replay the whole schema.
         $hasNewest = true;
         try {
-            self::$pdo->query('SELECT 1 FROM email_verifications LIMIT 1');
+            self::$pdo->query('SELECT 1 FROM subscriptions LIMIT 1');
         } catch (PDOException) {
             $hasNewest = false;
         }
@@ -94,6 +94,9 @@ final class DB
             if ($sql === false) {
                 throw new RuntimeException("Schema file missing: $file");
             }
+            // A UTF-8 BOM (editors add them silently) glues onto the first
+            // statement after splitting; SQLite ignores it but MySQL errors.
+            $sql = (string)preg_replace('/^\xEF\xBB\xBF/', '', $sql);
             // Strip -- comment lines first: a comment and the statement after
             // it share a chunk when splitting on ';'.
             $sql = (string)preg_replace('/^\s*--.*$/m', '', $sql);

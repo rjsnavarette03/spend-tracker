@@ -124,8 +124,7 @@ CREATE TABLE IF NOT EXISTS password_resets (
 
 -- Pending email verifications: one active row per user (UNIQUE user_id), holding
 -- a hashed 6-digit code (typed in the app) and a hashed backup link token
--- (one-click verify). `attempts` caps wrong-code guesses. This is the newest
--- table, so DB::ensureSchema probes it to decide whether to replay the schema.
+-- (one-click verify). `attempts` caps wrong-code guesses.
 CREATE TABLE IF NOT EXISTS email_verifications (
     id INT UNSIGNED NOT NULL AUTO_INCREMENT,
     user_id INT UNSIGNED NOT NULL,
@@ -139,3 +138,34 @@ CREATE TABLE IF NOT EXISTS email_verifications (
     UNIQUE KEY uniq_email_verifications_token (token_hash),
     CONSTRAINT fk_email_verifications_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+;
+
+-- Recurring subscriptions (Netflix, internet, ...). Auto-charged: when
+-- next_date <= today, Repo::processDueSubscriptions inserts an expense
+-- transaction on the linked account (dated next_date) and advances next_date
+-- by one cycle -- 'monthly' re-lands on bill_day (clamped to short months),
+-- 'interval' adds interval_days. account_id SET NULL on account delete =
+-- charging pauses until the user relinks. Newest table, so DB::ensureSchema
+-- probes it to decide whether to replay the schema.
+CREATE TABLE IF NOT EXISTS subscriptions (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    user_id INT UNSIGNED NOT NULL,
+    account_id INT UNSIGNED NULL,
+    category_id INT UNSIGNED NULL,
+    name VARCHAR(100) NOT NULL,
+    amount_cents BIGINT NOT NULL,
+    cycle ENUM('monthly','interval') NOT NULL,
+    bill_day TINYINT NULL,
+    interval_days SMALLINT NULL,
+    next_date DATE NOT NULL,
+    -- Last cycle date actually charged; updates may never move next_date
+    -- back to or before it (prevents stale-client double charges).
+    charged_through DATE NULL,
+    active TINYINT(1) NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_subscriptions_user_due (user_id, active, next_date),
+    CONSTRAINT fk_subscriptions_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_subscriptions_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE SET NULL,
+    CONSTRAINT fk_subscriptions_category FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
