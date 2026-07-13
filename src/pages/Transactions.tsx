@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Account, Category, Transaction, TxType } from '../../shared/types';
 import { api } from '../api';
 import { confirm, toast } from '../components/feedback';
@@ -36,28 +36,40 @@ export function Transactions({
   const [typeFilter, setTypeFilter] = useState<TxType | 'all'>('all');
   const [catFilter, setCatFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
+  // Debounced copy of `search` — the network query keys off this, not every
+  // keystroke, so typing fires one request after a pause instead of many.
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [modal, setModal] = useState<{ open: boolean; editing: Transaction | null }>({
     open: false,
     editing: null,
   });
   const [notice, setNotice] = useState('');
 
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedSearch(search), 250);
+    return () => clearTimeout(id);
+  }, [search]);
+
+  // Monotonic request id: a slow earlier response can resolve after a newer
+  // one, so ignore any result that isn't from the latest request in flight.
+  const reqSeq = useRef(0);
   const load = useCallback(async () => {
+    const seq = ++reqSeq.current;
     try {
-      setTxs(
-        await api.transactions.list({
-          from: period.start,
-          to: period.end,
-          type: typeFilter,
-          categoryId: catFilter === 'all' ? 'all' : Number(catFilter),
-          search,
-        })
-      );
+      const rows = await api.transactions.list({
+        from: period.start,
+        to: period.end,
+        type: typeFilter,
+        categoryId: catFilter === 'all' ? 'all' : Number(catFilter),
+        search: debouncedSearch,
+      });
+      if (seq !== reqSeq.current) return; // superseded — drop stale result
+      setTxs(rows);
       setLoaded(true);
     } catch (err) {
-      toast.error(cleanError(err));
+      if (seq === reqSeq.current) toast.error(cleanError(err));
     }
-  }, [period, typeFilter, catFilter, search]);
+  }, [period, typeFilter, catFilter, debouncedSearch]);
 
   useEffect(() => {
     void load();
@@ -124,12 +136,20 @@ export function Transactions({
 
       <div className="toolbar">
         <PeriodPicker value={period} onChange={setPeriod} availableYears={availableYears} />
-        <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as TxType | 'all')}>
+        <select
+          aria-label="Filter by type"
+          value={typeFilter}
+          onChange={(e) => setTypeFilter(e.target.value as TxType | 'all')}
+        >
           <option value="all">All types</option>
           <option value="income">Income</option>
           <option value="expense">Expenses</option>
         </select>
-        <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)}>
+        <select
+          aria-label="Filter by category"
+          value={catFilter}
+          onChange={(e) => setCatFilter(e.target.value)}
+        >
           <option value="all">All categories</option>
           {categories.map((c) => (
             <option key={c.id} value={c.id}>

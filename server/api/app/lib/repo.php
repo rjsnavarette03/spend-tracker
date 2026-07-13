@@ -805,10 +805,11 @@ final class Repo
         }
         $cycle = Validate::subCycle($data['cycle'] ?? null);
         $nextDate = Validate::date($data['nextDate'] ?? null);
-        // Monthly: the chosen next-charge date's day-of-month is the anchor
-        // every later month re-lands on. Storing it separately keeps a
-        // "31st" subscription on the 31st after clamping through February.
-        $billDay = $cycle === 'monthly' ? (int)substr($nextDate, 8, 2) : null;
+        // Monthly/yearly: the chosen next-charge date's day-of-month is the
+        // anchor every later cycle re-lands on. Storing it separately keeps a
+        // "31st" subscription on the 31st after clamping through February
+        // (and a Feb-29 yearly one on the 29th across non-leap years).
+        $billDay = $cycle === 'interval' ? null : (int)substr($nextDate, 8, 2);
         $intervalDays = $cycle === 'interval' ? Validate::intervalDays($data['intervalDays'] ?? null) : null;
         $active = !array_key_exists('active', $data) || (bool)$data['active'];
         return [$name, $amount, $accountId, $categoryId, $cycle, $billDay, $intervalDays, $nextDate, $active];
@@ -863,11 +864,12 @@ final class Repo
         if ($existing === null) {
             throw new ApiError('Subscription not found', 404);
         }
-        // Editing without touching the date must not lose the monthly anchor:
-        // a "31st" sub whose next_date currently reads Feb 28 (clamped) would
-        // otherwise get its bill_day re-derived as 28.
+        // Editing without touching the date must not lose the day anchor: a
+        // "31st" monthly sub whose next_date currently reads Feb 28 (clamped)
+        // would otherwise get its bill_day re-derived as 28 — same for a
+        // Feb-29 yearly sub showing Feb 28 in a non-leap year.
         if (
-            $cycle === 'monthly' && (string)$existing['cycle'] === 'monthly'
+            $cycle !== 'interval' && $cycle === (string)$existing['cycle']
             && $nextDate === (string)$existing['next_date'] && $existing['bill_day'] !== null
         ) {
             $billDay = (int)$existing['bill_day'];
@@ -985,7 +987,11 @@ final class Repo
         }
     }
 
-    /** One billing cycle after $date. Monthly re-lands on bill_day, clamped to short months. */
+    /**
+     * One billing cycle after $date. Monthly re-lands on bill_day next month,
+     * yearly on the same month + bill_day next year — both clamped to the
+     * target month's length (31st in short months, Feb 29 in non-leap years).
+     */
     private static function advanceSubDate(string $date, string $cycle, ?int $billDay, ?int $intervalDays): string
     {
         [$y, $m, $d] = array_map('intval', explode('-', $date));
@@ -993,10 +999,14 @@ final class Repo
             // mktime normalizes day overflow into the following month(s).
             return date('Y-m-d', (int)mktime(12, 0, 0, $m, $d + max(1, (int)$intervalDays), $y));
         }
-        $m += 1;
-        if ($m > 12) {
-            $m = 1;
+        if ($cycle === 'yearly') {
             $y += 1;
+        } else {
+            $m += 1;
+            if ($m > 12) {
+                $m = 1;
+                $y += 1;
+            }
         }
         $anchor = $billDay ?? $d;
         $lastDay = (int)date('t', (int)mktime(12, 0, 0, $m, 1, $y));

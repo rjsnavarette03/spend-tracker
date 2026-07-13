@@ -148,10 +148,10 @@ final class Validate
         return $c;
     }
 
-    /** Subscription billing cycle: same date monthly, or every N days. */
+    /** Subscription billing cycle: same date monthly/yearly, or every N days. */
     public static function subCycle(mixed $c): string
     {
-        if ($c !== 'monthly' && $c !== 'interval') {
+        if ($c !== 'monthly' && $c !== 'interval' && $c !== 'yearly') {
             throw new ApiError('Invalid billing cycle', 422);
         }
         return $c;

@@ -140,7 +140,7 @@ export function Budgets() {
           No expense categories yet — create some on the Categories page first.
         </div>
       ) : (
-        <div className="panel" style={{ padding: '6px 8px' }}>
+        <div className="panel table-panel">
           {/* budgets-table: ≤860px CSS restacks each row into an editable card */}
           <table className="table budgets-table">
             <thead>

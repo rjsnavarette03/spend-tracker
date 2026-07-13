@@ -282,7 +282,18 @@ export function Accounts({
                       <tr
                         key={a.id}
                         className="row-link"
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`View ${a.name}`}
                         onClick={() => navigate(`/accounts/${a.id}`)}
+                        onKeyDown={(e) => {
+                          // Only the row itself navigates; Enter/Space on the
+                          // Edit/Delete buttons inside must act on them, not here.
+                          if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+                            e.preventDefault();
+                            navigate(`/accounts/${a.id}`);
+                          }
+                        }}
                       >
                         <td>
                           <span className="cat-chip">
@@ -337,7 +348,7 @@ export function Accounts({
         </>
       )}
 
-      <div className="panel" style={{ marginTop: 14 }}>
+      <div className="panel mt-panel">
         <div className="panel-title">Transfers</div>
         {transfers.length === 0 ? (
           <div className="empty-state">

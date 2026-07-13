@@ -72,6 +72,7 @@ POST /auth/verify                 { code }                         (signed-in, u
 POST /auth/verify-link            { token } → signs in             (pre-auth)
 POST /auth/resend-verification                                     (signed-in, unverified)
 POST /auth/logout
+POST /auth/currency               { currency } → { ok, currency }  (auth; ISO-4217, 422 on junk)
 POST /auth/change-password        { currentPassword, newPassword } (auth)
 POST /auth/delete-account         { currentPassword } (auth even if unverified;
                                     password required only when the account has
@@ -80,14 +81,19 @@ POST /auth/delete-account         { currentPassword } (auth even if unverified;
 # all endpoints below require a signed-in AND email-verified user (requireVerifiedUser).
 GET  /categories                        POST /categories            { name, type, color }
 PUT  /categories/:id  { name, color }   DELETE /categories/:id
-GET  /transactions?month&type&categoryId&search
+GET  /transactions?month|from&to|type|categoryId|accountId|search   (all filters optional)
 POST /transactions   (TxInput)          PUT/DELETE /transactions/:id
+GET  /transfers?month                   POST /transfers  (TransferInput)
+PUT  /transfers/:id                      DELETE /transfers/:id
+     (money moved between accounts, optional fee; fee + amount leave the source,
+      only amount reaches the target; deleting an account NULLs its side)
 GET  /budgets                           PUT /budgets { categoryId, cadence, amountCents }  (0 deletes)
      (budgets are recurring per-category rules; cadence = week|month|year)
 GET  /subscriptions                     POST /subscriptions  (SubscriptionInput)
 PUT  /subscriptions/:id                 DELETE /subscriptions/:id
      (recurring auto-charges: cycle = monthly [bill_day derives from nextDate,
-      re-lands on that day, 29–31 clamp in short months] | interval [every
+      re-lands on that day, 29–31 clamp in short months] | yearly [same month +
+      bill_day every year, Feb 29 clamps in non-leap years] | interval [every
       intervalDays]. Repo::processDueSubscriptions runs before EVERY data
       request: while next_date <= today it inserts an expense tx dated the DUE
       date on the linked account and advances next_date — atomic claim via

@@ -53,12 +53,23 @@ final class DB
         try {
             self::$pdo->exec($sql);
         } catch (PDOException $e) {
+            // Prefer the driver error CODE over the message: MySQL/MariaDB
+            // localize error text (lc_messages), so English substring matching
+            // would misclassify a benign "duplicate column" as fatal and 500
+            // on a non-English server. Codes are locale-independent.
+            //   1050 table exists · 1060 dup column · 1061 dup key/index name
+            //   1091 can't drop (already gone) · 1826/121 dup constraint name
+            $code = isset($e->errorInfo[1]) ? (int)$e->errorInfo[1] : 0;
+            $benignMysql = [1050, 1060, 1061, 1091, 1826, 121];
+            // SQLite (dev/test only) never localizes, so message matching is
+            // safe there and also covers English MySQL as a belt-and-braces.
             $msg = strtolower($e->getMessage());
-            $benign = str_contains($msg, 'already exists')
+            $benign = in_array($code, $benignMysql, true)
+                || str_contains($msg, 'already exists')
                 || str_contains($msg, 'duplicate column')
                 || str_contains($msg, 'duplicate key')
                 || str_contains($msg, 'duplicate foreign key')
-                || str_contains($msg, 'errno: 121'); // MySQL duplicate constraint name
+                || str_contains($msg, 'errno: 121');
             if (!$benign) {
                 throw $e;
             }
@@ -203,6 +214,76 @@ final class DB
                 : 'ALTER TABLE accounts ADD COLUMN due_day2 TINYINT NULL';
             self::tryDdl($col);
         }
+
+        // Step 8: subscriptions.cycle gained 'yearly'. The first release
+        // shipped a two-value enum/CHECK, which CREATE IF NOT EXISTS can't
+        // widen — detect and widen idempotently.
+        self::migrateSubscriptionCycleYearly($driver);
+    }
+
+    /**
+     * Widen subscriptions.cycle to include 'yearly'.
+     *  - MySQL: read COLUMN_TYPE from information_schema; MODIFY the enum
+     *    in place when 'yearly' is missing (no data change).
+     *  - SQLite: a CHECK constraint can't be altered — rebuild the table
+     *    (same pattern as migrateBudgetsToCadence). SQLite is dev/test only.
+     */
+    private static function migrateSubscriptionCycleYearly(string $driver): void
+    {
+        assert(self::$pdo !== null);
+
+        if ($driver === 'sqlite') {
+            $row = self::$pdo
+                ->query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'subscriptions'")
+                ->fetch();
+            if ($row === false || str_contains((string)$row['sql'], "'yearly'")) {
+                return;
+            }
+            self::tryDdl(
+                "CREATE TABLE IF NOT EXISTS subscriptions_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    account_id INTEGER NULL REFERENCES accounts(id) ON DELETE SET NULL,
+                    category_id INTEGER NULL REFERENCES categories(id) ON DELETE SET NULL,
+                    name TEXT NOT NULL,
+                    amount_cents INTEGER NOT NULL,
+                    cycle TEXT NOT NULL CHECK (cycle IN ('monthly','interval','yearly')),
+                    bill_day INTEGER NULL,
+                    interval_days INTEGER NULL,
+                    next_date TEXT NOT NULL,
+                    charged_through TEXT NULL,
+                    active INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )"
+            );
+            self::tryDdl(
+                'INSERT INTO subscriptions_new (id, user_id, account_id, category_id, name, amount_cents, cycle, bill_day, interval_days, next_date, charged_through, active, created_at)
+                 SELECT id, user_id, account_id, category_id, name, amount_cents, cycle, bill_day, interval_days, next_date, charged_through, active, created_at FROM subscriptions'
+            );
+            self::tryDdl('DROP TABLE subscriptions');
+            self::tryDdl('ALTER TABLE subscriptions_new RENAME TO subscriptions');
+            self::tryDdl(
+                'CREATE INDEX IF NOT EXISTS idx_subscriptions_user_due ON subscriptions(user_id, active, next_date)'
+            );
+            return;
+        }
+
+        try {
+            $row = self::$pdo
+                ->query(
+                    "SELECT COLUMN_TYPE AS t FROM information_schema.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'subscriptions' AND COLUMN_NAME = 'cycle'"
+                )
+                ->fetch();
+        } catch (PDOException) {
+            return; // table missing — the step-1 replay creates it correctly
+        }
+        if ($row === false || str_contains((string)$row['t'], 'yearly')) {
+            return;
+        }
+        self::tryDdl(
+            "ALTER TABLE subscriptions MODIFY cycle ENUM('monthly','interval','yearly') NOT NULL"
+        );
     }
 
     /** True if `SELECT $col FROM $table` works (i.e. the column exists). */

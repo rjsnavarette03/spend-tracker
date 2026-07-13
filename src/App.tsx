@@ -5,6 +5,7 @@ import { api } from './api';
 import { ThemeToggle } from './components/ThemeToggle';
 import {
   BankIcon,
+  ChevronsLeftIcon,
   DashboardIcon,
   ListIcon,
   LogoutIcon,
@@ -47,9 +48,31 @@ const NAV: Array<{ to: string; label: string; shortLabel?: string; icon: JSX.Ele
   { to: '/categories', label: 'Categories', icon: <TagIcon /> },
 ];
 
+const SIDEBAR_KEY = 'spendtracker-sidebar';
+
 export default function AppLayout({ user, onLogout }: { user: User; onLogout: () => void }) {
   const navigate = useNavigate();
   const [period, setPeriod] = useState<Period>(() => currentPeriod('month'));
+  // Desktop sidebar collapse (icon rail). localStorage guarded: it can throw
+  // in storage-blocked browsers, and this runs during render.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(SIDEBAR_KEY) === 'collapsed';
+    } catch {
+      return false;
+    }
+  });
+  const toggleSidebar = () => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(SIDEBAR_KEY, next ? 'collapsed' : 'expanded');
+      } catch {
+        /* storage unavailable — state still applies this visit */
+      }
+      return next;
+    });
+  };
   const [categories, setCategories] = useState<Category[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [availableYears, setAvailableYears] = useState<number[]>([]);
@@ -148,12 +171,23 @@ export default function AppLayout({ user, onLogout }: { user: User; onLogout: ()
         </div>
       </header>
 
-      <aside className="sidebar">
-        <div className="logo">
-          <span className="logo-badge">
-            <WalletIcon size={17} />
-          </span>
-          SpendTracker
+      <aside className={`sidebar ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+        <div className="sidebar-top">
+          <div className="logo">
+            <span className="logo-badge">
+              <WalletIcon size={17} />
+            </span>
+            <span className="logo-text">SpendTracker</span>
+          </div>
+          <button
+            className="btn-icon sidebar-toggle"
+            onClick={toggleSidebar}
+            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-expanded={!sidebarCollapsed}
+          >
+            <ChevronsLeftIcon />
+          </button>
         </div>
         <nav className="nav">
           {NAV.map((item) => (
@@ -162,6 +196,7 @@ export default function AppLayout({ user, onLogout }: { user: User; onLogout: ()
               to={item.to}
               end={item.to === '/'}
               className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+              title={item.label}
             >
               {item.icon}
               <span className="nav-label">{item.label}</span>

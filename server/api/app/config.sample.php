@@ -32,6 +32,13 @@ return [
     // test suite). Leave unset/absent in production.
     // 'mail_log_file' => __DIR__ . '/maillog.txt',
 
+    // Canonical origin used to build links in outgoing emails (password reset,
+    // email verification). REQUIRED in production: without it the links are
+    // derived from the request Host header, which an attacker can spoof to
+    // steal reset tokens (CWE-640). No trailing slash. When absent, falls back
+    // to the request host (acceptable for local dev only).
+    'app_base_url' => 'https://budgettracker.rjsnavarette.com',
+
     // Timezone for server-side "today" (subscription charge days, budget
     // periods). Set to your user base's zone; defaults to UTC when absent.
     'timezone' => 'Asia/Manila',

@@ -130,7 +130,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     category_id INTEGER NULL REFERENCES categories(id) ON DELETE SET NULL,
     name TEXT NOT NULL,
     amount_cents INTEGER NOT NULL,
-    cycle TEXT NOT NULL CHECK (cycle IN ('monthly','interval')),
+    cycle TEXT NOT NULL CHECK (cycle IN ('monthly','interval','yearly')),
     bill_day INTEGER NULL,
     interval_days INTEGER NULL,
     next_date TEXT NOT NULL,

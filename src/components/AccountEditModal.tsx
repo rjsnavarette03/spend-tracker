@@ -219,14 +219,22 @@ export function AccountEditModal({
         </div>
 
         <div className="field">
-          <label htmlFor="acc-opening">Amount</label>
+          {/* This field is the account's OPENING balance. For a new account
+              that equals the current balance, but when editing an account
+              with activity it does NOT — transactions/payments are applied on
+              top — so the label and hint must not claim it's "current". */}
+          <label htmlFor="acc-opening">{initial ? 'Starting amount' : 'Amount'}</label>
           <MoneyInput id="acc-opening" value={opening} onChange={setOpening} />
           <div className="field-hint">
-            {type === 'debit'
-              ? "The account's current balance."
-              : type === 'credit'
-                ? 'How much you currently owe on this card'
-                : 'How much you currently owe / borrowed'}
+            {initial
+              ? type === 'debit'
+                ? 'The starting balance. Transactions since are added on top to get the current balance.'
+                : 'The starting amount owed. Payments and charges since adjust the current balance.'
+              : type === 'debit'
+                ? "The account's current balance."
+                : type === 'credit'
+                  ? 'How much you currently owe on this card'
+                  : 'How much you currently owe / borrowed'}
           </div>
         </div>
 

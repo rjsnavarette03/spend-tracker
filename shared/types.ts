@@ -126,11 +126,12 @@ export interface Budget {
 // debit/credit account. When nextDate arrives the server inserts an ordinary
 // expense transaction (dated nextDate) and advances nextDate one cycle:
 // 'monthly' re-lands on billDay every month (29–31 clamp in short months),
-// 'interval' adds intervalDays (e.g. every 30 days). Charges post on the next
-// API request after the date passes (no cron on shared hosting) and catch up
-// if several cycles were missed. accountId goes null if the account is
-// deleted — charging pauses until relinked.
-export type SubscriptionCycle = 'monthly' | 'interval';
+// 'yearly' on the same month + billDay every year (Feb 29 clamps to Feb 28
+// in non-leap years), 'interval' adds intervalDays (e.g. every 30 days).
+// Charges post on the next API request after the date passes (no cron on
+// shared hosting) and catch up if several cycles were missed. accountId goes
+// null if the account is deleted — charging pauses until relinked.
+export type SubscriptionCycle = 'monthly' | 'yearly' | 'interval';
 
 export interface Subscription {
   id: number;

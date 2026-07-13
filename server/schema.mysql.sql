@@ -154,7 +154,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     category_id INT UNSIGNED NULL,
     name VARCHAR(100) NOT NULL,
     amount_cents BIGINT NOT NULL,
-    cycle ENUM('monthly','interval') NOT NULL,
+    cycle ENUM('monthly','interval','yearly') NOT NULL,
     bill_day TINYINT NULL,
     interval_days SMALLINT NULL,
     next_date DATE NOT NULL,

@@ -35,6 +35,15 @@ function latestResetToken(email) {
   return null;
 }
 
+/** The most recent full reset/verify link (origin + query) emailed to `email`. */
+function latestEmailLink(email) {
+  for (const b of mailBlocks(email)) {
+    const m = b.match(/https?:\/\/\S+\/\?(?:reset|verify)=[a-f0-9]{64}/);
+    if (m) return m[0];
+  }
+  return null;
+}
+
 /** Most recent 6-digit verification code emailed to `email`. */
 function latestVerificationCode(email) {
   for (const b of mailBlocks(email)) {
@@ -904,6 +913,28 @@ let bankId = 0;
     `got ${prepaidNow?.nextDate}`
   );
 
+  // yearly sub due today: charges once, advances to the same date NEXT year
+  const domain = (await s.call('POST', '/subscriptions', {
+    name: 'Domain Renewal', amountCents: 79900, accountId: acct.id, categoryId: null,
+    cycle: 'yearly', intervalDays: null, nextDate: todayIso, active: true,
+  })).data;
+  check(
+    'yearly subscription created; billDay = nextDate day, no intervalDays',
+    domain?.id > 0 && domain.cycle === 'yearly' && domain.billDay === today.getDate() && domain.intervalDays === null,
+    JSON.stringify(domain)
+  );
+  await s.call('GET', '/subscriptions'); // triggers the charge
+  const domainTxs = (await s.call('GET', '/transactions')).data.filter(
+    (t) => t.note === 'Domain Renewal (subscription)'
+  );
+  const domainNow = (await s.call('GET', '/subscriptions')).data.find((x) => x.id === domain.id);
+  const nextYearIso = iso(new Date(today.getFullYear() + 1, today.getMonth(), today.getDate()));
+  check(
+    'yearly sub charged once today and advanced exactly one year',
+    domainTxs.length === 1 && domainTxs[0].date === todayIso && domainNow?.nextDate === nextYearIso,
+    JSON.stringify({ txs: domainTxs.map((t) => t.date), next: domainNow?.nextDate, expected: nextYearIso })
+  );
+
   // paused subs never charge; resuming does NOT back-charge the paused stretch
   const gym = (await s.call('POST', '/subscriptions', {
     name: 'Gym', amountCents: 2000, accountId: acct.id, categoryId: null,
@@ -1144,6 +1175,24 @@ let bankId = 0;
   await c.call('GET', '/auth/me').then((r) => (c.csrf = r.data.csrf));
   const unknown = await c.call('POST', '/auth/forgot', { email: `nobody.${suffix}@test.local` });
   check('forgot for unknown email -> ok (no enumeration)', unknown.status === 200 && unknown.data.ok === true);
+
+  // Reset-poisoning regression (DEF-1 / CWE-640): a spoofed Host header must
+  // NOT leak into the emailed reset link. Requires 'app_base_url' in config;
+  // the runner passes the expected origin via APP_BASE_URL.
+  if (MAIL_LOG && process.env.APP_BASE_URL) {
+    const base = process.env.APP_BASE_URL.replace(/\/$/, '');
+    const pc = new Client();
+    await pc.call('GET', '/auth/me').then((r) => (pc.csrf = r.data.csrf));
+    const email = `poison.${suffix}@test.local`;
+    await pc.call('POST', '/auth/register', { email, password, name: 'Poison' });
+    await pc.call('POST', '/auth/forgot', { email }, { Host: 'evil.example', 'X-Forwarded-Host': 'evil.example' });
+    const link = latestEmailLink(email);
+    check(
+      'emailed reset link uses configured origin, ignores spoofed Host',
+      typeof link === 'string' && link.startsWith(base + '/') && !link.includes('evil.example'),
+      `link=${link}`
+    );
+  }
 
   if (MAIL_LOG) {
     // Full flow: register, request reset, read token from mail log, reset.

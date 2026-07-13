@@ -16,10 +16,17 @@ import {
   todayStr,
 } from '../format';
 
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
 function cycleLabel(s: Subscription): string {
-  return s.cycle === 'monthly'
-    ? `Monthly on the ${ordinal(s.billDay ?? 1)}`
-    : `Every ${s.intervalDays} day${s.intervalDays === 1 ? '' : 's'}`;
+  if (s.cycle === 'monthly') return `Monthly on the ${ordinal(s.billDay ?? 1)}`;
+  if (s.cycle === 'yearly') {
+    // The month never changes across yearly advances; billDay is the anchor
+    // day (nextDate's own day can read clamped, e.g. Feb 28 for a Feb 29 sub).
+    const month = MONTH_NAMES[Number(s.nextDate.slice(5, 7)) - 1] ?? '';
+    return `Yearly on ${month} ${s.billDay ?? Number(s.nextDate.slice(8, 10))}`;
+  }
+  return `Every ${s.intervalDays} day${s.intervalDays === 1 ? '' : 's'}`;
 }
 
 /** Days from today until the next charge, for the urgency pill. */
@@ -38,9 +45,10 @@ function chargeLabel(nextDate: string): string {
   return 'Charges ' + new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-/** Rough normalized monthly cost — interval subs scale by 30/interval. */
+/** Rough normalized monthly cost — yearly ÷12, interval scales by 30/interval. */
 function monthlyCents(s: Subscription): number {
   if (s.cycle === 'monthly') return s.amountCents;
+  if (s.cycle === 'yearly') return Math.round(s.amountCents / 12);
   return Math.round((s.amountCents * 30) / Math.max(1, s.intervalDays ?? 30));
 }
 
@@ -168,7 +176,7 @@ export function Subscriptions() {
             </div>
           </div>
 
-          <div className="panel" style={{ marginTop: 14 }}>
+          <div className="panel mt-panel">
             {subs.map((s) => {
               const days = daysUntil(s.nextDate);
               const running = s.active && s.accountId != null;
@@ -392,6 +400,13 @@ function SubscriptionModal({
             </button>
             <button
               type="button"
+              className={cycle === 'yearly' ? 'active-account' : ''}
+              onClick={() => setCycle('yearly')}
+            >
+              Yearly
+            </button>
+            <button
+              type="button"
               className={cycle === 'interval' ? 'active-account' : ''}
               onClick={() => setCycle('interval')}
             >
@@ -409,6 +424,10 @@ function SubscriptionModal({
                   : Number(nextDate.slice(8, 10)) || 1
               )}{' '}
               of every month (shorter months charge on their last day).
+            </div>
+          ) : cycle === 'yearly' ? (
+            <div className="field-hint">
+              Repeats on this date every year — e.g. domain renewals, annual plans, insurance.
             </div>
           ) : (
             <div className="field-hint">

@@ -178,7 +178,7 @@ export function AccountDetail() {
         )}
       </div>
 
-      <div className="panel" style={{ marginTop: 14 }}>
+      <div className="panel mt-panel">
         <div className="panel-title">Transactions</div>
         {!loaded ? (
           <div className="empty-state">Loading…</div>
@@ -237,7 +237,7 @@ export function AccountDetail() {
         )}
       </div>
 
-      <div className="panel" style={{ marginTop: 14 }}>
+      <div className="panel mt-panel">
         <div className="panel-title">Transfers &amp; payments</div>
         {!loaded ? (
           <div className="empty-state">Loading…</div>

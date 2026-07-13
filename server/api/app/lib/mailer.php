@@ -35,8 +35,22 @@ final class Mailer
         return $host === '' ? 'localhost' : $host;
     }
 
+    /**
+     * Canonical origin for links embedded in outgoing emails (password reset,
+     * email verification). MUST come from trusted config, never the request:
+     * building it from $_SERVER['HTTP_HOST'] lets an attacker send a
+     * forgot-password request with a spoofed Host header and have the victim's
+     * genuine reset email point at attacker-controlled infrastructure, leaking
+     * the single-use token (CWE-640, reset poisoning → account takeover).
+     * Set 'app_base_url' in config.php per environment. The request-derived
+     * fallback exists only so local dev works without that key.
+     */
     public static function appBaseUrl(): string
     {
+        $configured = Http::config('app_base_url');
+        if (is_string($configured) && preg_match('#^https?://[^/\s]+$#', rtrim($configured, '/')) === 1) {
+            return rtrim($configured, '/');
+        }
         $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
             || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
         $scheme = $https ? 'https' : 'http';

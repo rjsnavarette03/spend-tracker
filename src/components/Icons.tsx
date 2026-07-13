@@ -231,3 +231,10 @@ export const PlayIcon = ({ size }: IconProps) => (
     <polygon points="6 3 20 12 6 21 6 3" />
   </svg>
 );
+
+export const ChevronsLeftIcon = ({ size }: IconProps) => (
+  <svg {...base(size)}>
+    <path d="m11 17-5-5 5-5" />
+    <path d="m18 17-5-5 5-5" />
+  </svg>
+);
