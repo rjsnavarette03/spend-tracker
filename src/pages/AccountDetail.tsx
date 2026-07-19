@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { Transaction, Transfer } from '../../shared/types';
 import { api } from '../api';
 import { useAppContext } from '../App';
@@ -85,6 +85,7 @@ const DETAIL_TRANSFER_SORTS: SortOption<Transfer>[] = [
 export function AccountDetail() {
   const { period, categories, accounts, onDataChanged } = useAppContext();
   const params = useParams();
+  const navigate = useNavigate();
   const id = Number(params.id);
   const account = accounts.find((a) => a.id === id) ?? null;
 
@@ -168,6 +169,33 @@ export function AccountDetail() {
     }
   };
 
+  const removeAccount = async () => {
+    if (!account) return;
+    const usage: string[] = [];
+    if (account.txCount > 0)
+      usage.push(`${account.txCount} transaction${account.txCount === 1 ? '' : 's'}`);
+    if (account.transferCount > 0)
+      usage.push(`${account.transferCount} transfer${account.transferCount === 1 ? '' : 's'}`);
+    const message =
+      usage.length > 0
+        ? `${usage.join(' and ')} will keep their history but lose the link to this account.`
+        : 'This account will be removed.';
+    const ok = await confirm({
+      title: `Delete "${account.name}"?`,
+      message,
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api.accounts.remove(account.id);
+      navigate('/accounts'); // leave the now-deleted detail page
+      onDataChanged(); // refresh the shared accounts list
+    } catch (err) {
+      toast.error(cleanError(err));
+    }
+  };
+
   // accounts are loaded by the layout; once present, a missing one is a real 404.
   if (accounts.length > 0 && !account) {
     return (
@@ -212,6 +240,9 @@ export function AccountDetail() {
         <div className="head-actions">
           <button className="btn" onClick={() => setEditOpen(true)}>
             Edit
+          </button>
+          <button className="btn btn-danger" onClick={() => void removeAccount()}>
+            Delete
           </button>
           {account.type === 'debit' && (
             <button

@@ -151,30 +151,6 @@ export function Accounts({
     onDataChanged();
   };
 
-  const removeAccount = async (a: Account) => {
-    const usage: string[] = [];
-    if (a.txCount > 0) usage.push(`${a.txCount} transaction${a.txCount === 1 ? '' : 's'}`);
-    if (a.transferCount > 0)
-      usage.push(`${a.transferCount} transfer${a.transferCount === 1 ? '' : 's'}`);
-    const message =
-      usage.length > 0
-        ? `${usage.join(' and ')} will keep their history but lose the link to this account.`
-        : 'This account will be removed.';
-    const ok = await confirm({
-      title: `Delete "${a.name}"?`,
-      message,
-      confirmLabel: 'Delete',
-      danger: true,
-    });
-    if (!ok) return;
-    try {
-      await api.accounts.remove(a.id);
-      afterMutation();
-    } catch (err) {
-      toast.error(cleanError(err));
-    }
-  };
-
   const removeTransfer = async (t: Transfer) => {
     const ok = await confirm({
       title: 'Delete transfer',
@@ -320,9 +296,9 @@ export function Accounts({
                         aria-label={`View ${a.name}`}
                         onClick={() => navigate(`/accounts/${a.id}`)}
                         onKeyDown={(e) => {
-                          // Only the row itself navigates; Enter/Space on the
-                          // Edit/Delete buttons inside must act on them, not here.
-                          if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+                          // The whole row opens the account (where it can be
+                          // edited or deleted); Enter/Space mirror the click.
+                          if (e.key === 'Enter' || e.key === ' ') {
                             e.preventDefault();
                             navigate(`/accounts/${a.id}`);
                           }
@@ -347,28 +323,6 @@ export function Accounts({
                         <td className={`num ${a.balanceCents < 0 ? 'amount-expense' : 'amount-income'}`}>
                           {fmtMoney(a.balanceCents)}
                           {a.balanceCents < 0 && <span className="owed-tag"> owed</span>}
-                        </td>
-                        <td className="actions">
-                          <button
-                            className="btn-icon"
-                            title="Edit"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setAccountModal({ open: true, editing: a });
-                            }}
-                          >
-                            <PencilIcon />
-                          </button>
-                          <button
-                            className="btn-icon danger"
-                            title="Delete"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              removeAccount(a);
-                            }}
-                          >
-                            <TrashIcon />
-                          </button>
                         </td>
                       </tr>
                     ))}
