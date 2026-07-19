@@ -311,15 +311,19 @@ export function Login({
 
         <div className="login-foot">
           <div>Your data is private to your account only.</div>
-          <div className="login-foot-links">
-            <a href="/privacy" target="_blank" rel="noopener noreferrer">
-              Privacy Policy
-            </a>
-            <span aria-hidden="true">·</span>
-            <a href="/terms" target="_blank" rel="noopener noreferrer">
-              Terms of Use
-            </a>
-          </div>
+          {/* Register already links Terms + Privacy in the "By creating an
+              account…" line above the button — don't repeat them here. */}
+          {mode !== 'register' && (
+            <div className="login-foot-links">
+              <a href="/privacy" target="_blank" rel="noopener noreferrer">
+                Privacy Policy
+              </a>
+              <span aria-hidden="true">·</span>
+              <a href="/terms" target="_blank" rel="noopener noreferrer">
+                Terms of Use
+              </a>
+            </div>
+          )}
         </div>
       </div>
     </div>
