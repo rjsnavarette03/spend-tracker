@@ -10,10 +10,11 @@ import type {
 import { api } from '../api';
 import { toast } from '../components/feedback';
 import { DonutChart } from '../components/DonutChart';
-import { PlusIcon } from '../components/Icons';
+import { PlusIcon, TransferIcon } from '../components/Icons';
 import { PeriodPicker } from '../components/PeriodPicker';
 import { ProgressBar } from '../components/ProgressBar';
 import { TransactionModal } from '../components/TransactionModal';
+import { TransferModal } from '../components/TransferModal';
 import { TrendChart } from '../components/TrendChart';
 import {
   CADENCE_PERIOD,
@@ -51,6 +52,7 @@ export function Dashboard({
 }) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [showTransfer, setShowTransfer] = useState(false);
 
   // Budgets & the 6-month trend stay monthly, keyed to the period's month.
   const budgetMonth = period.start.slice(0, 7);
@@ -78,6 +80,8 @@ export function Dashboard({
 
   const { summary, trend, breakdown, budgets, recent } = data;
   const net = summary.incomeCents - summary.expenseCents;
+  // Transfers move money between debit accounts, so two are needed.
+  const debitCount = accounts.filter((a) => a.type === 'debit').length;
   // Budgets are recurring rules at mixed cadences, so a single "% used" across
   // all of them would be apples-to-oranges. Track how many are within limit
   // (each compared against its own cadence's current period) instead.
@@ -96,6 +100,14 @@ export function Dashboard({
         </div>
         <div className="head-actions">
           <PeriodPicker value={period} onChange={setPeriod} availableYears={availableYears} />
+          <button
+            className="btn"
+            onClick={() => setShowTransfer(true)}
+            disabled={debitCount < 2}
+            title={debitCount < 2 ? 'You need at least two debit accounts to transfer' : undefined}
+          >
+            <TransferIcon /> Transfer
+          </button>
           <button className="btn btn-primary" onClick={() => setShowAdd(true)}>
             <PlusIcon /> Add transaction
           </button>
@@ -227,6 +239,17 @@ export function Dashboard({
           accounts={accounts}
           defaultMonth={budgetMonth}
           onClose={() => setShowAdd(false)}
+          onSaved={() => {
+            void load();
+            onDataChanged();
+          }}
+        />
+      )}
+      {showTransfer && (
+        <TransferModal
+          initial={null}
+          accounts={accounts}
+          onClose={() => setShowTransfer(false)}
           onSaved={() => {
             void load();
             onDataChanged();
