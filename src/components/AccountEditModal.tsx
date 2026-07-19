@@ -11,6 +11,7 @@ import {
   todayStr,
 } from '../format';
 import { fileToAccountImage } from '../image';
+import { CheckIcon, PlusIcon, TrashIcon, UploadIcon } from './Icons';
 import { Modal } from './Modal';
 import { MoneyInput } from './MoneyInput';
 
@@ -367,7 +368,7 @@ export function AccountEditModal({
                   onClick={() => fileRef.current?.click()}
                   disabled={imgBusy}
                 >
-                  {imgBusy ? 'Processing…' : image ? 'Change image' : 'Upload image'}
+                  <UploadIcon /> {imgBusy ? 'Processing…' : image ? 'Change image' : 'Upload image'}
                 </button>
                 {image && (
                   <button
@@ -378,7 +379,7 @@ export function AccountEditModal({
                       setMode('color');
                     }}
                   >
-                    Remove
+                    <TrashIcon /> Remove
                   </button>
                 )}
               </div>
@@ -396,7 +397,7 @@ export function AccountEditModal({
             Cancel
           </button>
           <button type="submit" className="btn btn-primary" disabled={saving || imgBusy}>
-            {initial ? 'Save changes' : 'Create account'}
+            {initial ? <CheckIcon /> : <PlusIcon />} {initial ? 'Save changes' : 'Create account'}
           </button>
         </div>
       </form>

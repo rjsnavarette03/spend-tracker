@@ -2,6 +2,7 @@ import { FormEvent, useState } from 'react';
 import type { Account } from '../../shared/types';
 import { api } from '../api';
 import { cleanError, fmtMoney, parseAmountToCents, todayStr } from '../format';
+import { BanknoteIcon } from './Icons';
 import { Modal } from './Modal';
 import { MoneyInput } from './MoneyInput';
 
@@ -137,7 +138,7 @@ export function PayModal({
             Cancel
           </button>
           <button type="submit" className="btn btn-primary" disabled={saving}>
-            {saving ? 'Paying…' : 'Pay'}
+            <BanknoteIcon /> {saving ? 'Paying…' : 'Pay'}
           </button>
         </div>
       </form>

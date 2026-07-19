@@ -238,3 +238,33 @@ export const ChevronsLeftIcon = ({ size }: IconProps) => (
     <path d="m18 17-5-5 5-5" />
   </svg>
 );
+
+export const CheckIcon = ({ size }: IconProps) => (
+  <svg {...base(size ?? 16)}>
+    <polyline points="20 6 9 17 4 12" />
+  </svg>
+);
+
+export const KeyIcon = ({ size }: IconProps) => (
+  <svg {...base(size ?? 15)}>
+    <circle cx="7.5" cy="15.5" r="5.5" />
+    <path d="m21 2-9.6 9.6" />
+    <path d="m15.5 7.5 3 3L22 7l-3-3" />
+  </svg>
+);
+
+export const UploadIcon = ({ size }: IconProps) => (
+  <svg {...base(size ?? 15)}>
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="17 8 12 3 7 8" />
+    <line x1="12" y1="3" x2="12" y2="15" />
+  </svg>
+);
+
+export const BanknoteIcon = ({ size }: IconProps) => (
+  <svg {...base(size ?? 16)}>
+    <rect x="2" y="6" width="20" height="12" rx="2" />
+    <circle cx="12" cy="12" r="2" />
+    <path d="M6 12h.01M18 12h.01" />
+  </svg>
+);

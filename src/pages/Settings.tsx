@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import type { User } from '../../shared/types';
 import { api } from '../api';
 import { toast } from '../components/feedback';
-import { EyeIcon, EyeOffIcon } from '../components/Icons';
+import { CheckIcon, EyeIcon, EyeOffIcon, KeyIcon, TrashIcon } from '../components/Icons';
 import { cleanError } from '../format';
 
 // Curated list; the server accepts any valid 3-letter code and the formatter
@@ -199,7 +199,7 @@ export function Settings({ user, refreshUser }: { user: User; refreshUser: () =>
               className="btn btn-primary"
               disabled={savingCurrency || !currencyDirty}
             >
-              {savingCurrency ? 'Saving…' : 'Save currency'}
+              <CheckIcon /> {savingCurrency ? 'Saving…' : 'Save currency'}
             </button>
           </div>
         </form>
@@ -269,7 +269,7 @@ export function Settings({ user, refreshUser }: { user: User; refreshUser: () =>
               className="btn btn-primary"
               disabled={savingPassword || !passwordDirty}
             >
-              {savingPassword ? 'Saving…' : needsCurrent ? 'Change password' : 'Set password'}
+              <KeyIcon /> {savingPassword ? 'Saving…' : needsCurrent ? 'Change password' : 'Set password'}
             </button>
           </div>
         </form>
@@ -282,7 +282,7 @@ export function Settings({ user, refreshUser }: { user: User; refreshUser: () =>
           </p>
           {!deleteOpen ? (
             <button type="button" className="btn btn-danger" onClick={() => setDeleteOpen(true)}>
-              Delete account…
+              <TrashIcon /> Delete account…
             </button>
           ) : (
             <div className="danger-confirm">
@@ -311,7 +311,7 @@ export function Settings({ user, refreshUser }: { user: User; refreshUser: () =>
                   onClick={() => void deleteAccount()}
                   disabled={deleting || (needsCurrent && deletePw === '')}
                 >
-                  {deleting ? 'Deleting…' : 'Permanently delete my account'}
+                  <TrashIcon /> {deleting ? 'Deleting…' : 'Permanently delete my account'}
                 </button>
                 <button
                   type="button"

@@ -2,6 +2,7 @@ import { FormEvent, useState } from 'react';
 import type { Category, TxType } from '../../shared/types';
 import { api } from '../api';
 import { cleanError } from '../format';
+import { CheckIcon, PlusIcon } from './Icons';
 import { Modal } from './Modal';
 
 const SWATCHES = [
@@ -86,7 +87,7 @@ export function CategoryModal({
             Cancel
           </button>
           <button type="submit" className="btn btn-primary" disabled={saving}>
-            {initial ? 'Save changes' : 'Create category'}
+            {initial ? <CheckIcon /> : <PlusIcon />} {initial ? 'Save changes' : 'Create category'}
           </button>
         </div>
       </form>

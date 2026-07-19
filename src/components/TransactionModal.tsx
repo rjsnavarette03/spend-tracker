@@ -2,6 +2,7 @@ import { FormEvent, useMemo, useState } from 'react';
 import type { Account, Category, Transaction, TxType } from '../../shared/types';
 import { api } from '../api';
 import { centsToInput, cleanError, fmtMoney, parseAmountToCents, todayStr } from '../format';
+import { CheckIcon, PlusIcon } from './Icons';
 import { Modal } from './Modal';
 import { MoneyInput } from './MoneyInput';
 
@@ -212,7 +213,7 @@ export function TransactionModal({
             Cancel
           </button>
           <button type="submit" className="btn btn-primary" disabled={saving}>
-            {initial ? 'Save changes' : 'Add transaction'}
+            {initial ? <CheckIcon /> : <PlusIcon />} {initial ? 'Save changes' : 'Add transaction'}
           </button>
         </div>
       </form>

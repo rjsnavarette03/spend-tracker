@@ -2,6 +2,7 @@ import { FormEvent, useState } from 'react';
 import type { Account, Transfer } from '../../shared/types';
 import { api } from '../api';
 import { centsToInput, cleanError, fmtMoney, parseAmountToCents, todayStr } from '../format';
+import { CheckIcon, TransferIcon } from './Icons';
 import { Modal } from './Modal';
 import { MoneyInput } from './MoneyInput';
 
@@ -167,7 +168,7 @@ export function TransferModal({
             Cancel
           </button>
           <button type="submit" className="btn btn-primary" disabled={saving}>
-            {initial ? 'Save changes' : 'Transfer'}
+            {initial ? <CheckIcon /> : <TransferIcon />} {initial ? 'Save changes' : 'Transfer'}
           </button>
         </div>
       </form>

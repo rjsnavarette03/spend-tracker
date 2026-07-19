@@ -3,7 +3,7 @@ import type { Account, Category, Subscription, SubscriptionCycle } from '../../s
 import { api } from '../api';
 import { useAppContext } from '../App';
 import { confirm, toast } from '../components/feedback';
-import { PauseIcon, PencilIcon, PlayIcon, PlusIcon, TrashIcon } from '../components/Icons';
+import { CheckIcon, PauseIcon, PencilIcon, PlayIcon, PlusIcon, TrashIcon } from '../components/Icons';
 import { Modal } from '../components/Modal';
 import { MoneyInput } from '../components/MoneyInput';
 import {
@@ -500,7 +500,7 @@ function SubscriptionModal({
             Cancel
           </button>
           <button type="submit" className="btn btn-primary" disabled={saving}>
-            {initial ? 'Save changes' : 'Add subscription'}
+            {initial ? <CheckIcon /> : <PlusIcon />} {initial ? 'Save changes' : 'Add subscription'}
           </button>
         </div>
       </form>

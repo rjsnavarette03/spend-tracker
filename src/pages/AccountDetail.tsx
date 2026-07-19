@@ -10,7 +10,14 @@ import { PayModal } from '../components/PayModal';
 import { TransactionModal } from '../components/TransactionModal';
 import { TransferModal } from '../components/TransferModal';
 import { Pager } from '../components/Pager';
-import { PencilIcon, TrashIcon } from '../components/Icons';
+import {
+  BanknoteIcon,
+  CoinsIcon,
+  PencilIcon,
+  PlusIcon,
+  TransferIcon,
+  TrashIcon,
+} from '../components/Icons';
 import { cleanError, dateLabel, fmtMoney } from '../format';
 import { confirm, toast } from '../components/feedback';
 import { usePagedTable } from '../usePagedTable';
@@ -239,10 +246,10 @@ export function AccountDetail() {
         </div>
         <div className="head-actions">
           <button className="btn" onClick={() => setEditOpen(true)}>
-            Edit
+            <PencilIcon /> Edit
           </button>
           <button className="btn btn-danger" onClick={() => void removeAccount()}>
-            Delete
+            <TrashIcon /> Delete
           </button>
           {account.type === 'debit' && (
             <button
@@ -255,7 +262,7 @@ export function AccountDetail() {
                   : undefined
               }
             >
-              Transfer
+              <TransferIcon /> Transfer
             </button>
           )}
           {/* Debit & credit can add a transaction (credit = expense/purchase only,
@@ -265,7 +272,7 @@ export function AccountDetail() {
               className={account.type === 'debit' ? 'btn btn-primary' : 'btn'}
               onClick={() => setTxModal({ open: true, editing: null })}
             >
-              Add transaction
+              <PlusIcon /> Add transaction
             </button>
           )}
           {account.type === 'loan' && (
@@ -279,7 +286,7 @@ export function AccountDetail() {
                   : undefined
               }
             >
-              Borrow again
+              <CoinsIcon size={16} /> Borrow again
             </button>
           )}
           {account.type !== 'debit' && (
@@ -293,7 +300,7 @@ export function AccountDetail() {
                   : undefined
               }
             >
-              Pay
+              <BanknoteIcon /> Pay
             </button>
           )}
         </div>

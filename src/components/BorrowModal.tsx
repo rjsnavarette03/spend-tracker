@@ -2,6 +2,7 @@ import { FormEvent, useState } from 'react';
 import type { Account } from '../../shared/types';
 import { api } from '../api';
 import { cleanError, fmtMoney, parseAmountToCents, todayStr } from '../format';
+import { CoinsIcon } from './Icons';
 import { Modal } from './Modal';
 import { MoneyInput } from './MoneyInput';
 
@@ -143,7 +144,7 @@ export function BorrowModal({
             Cancel
           </button>
           <button type="submit" className="btn btn-primary" disabled={saving}>
-            {saving ? 'Borrowing…' : 'Borrow'}
+            <CoinsIcon size={16} /> {saving ? 'Borrowing…' : 'Borrow'}
           </button>
         </div>
       </form>

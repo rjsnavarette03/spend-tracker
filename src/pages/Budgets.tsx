@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { Budget, BudgetCadence } from '../../shared/types';
 import { api } from '../api';
 import { toast } from '../components/feedback';
+import { CheckIcon } from '../components/Icons';
 import { MoneyInput } from '../components/MoneyInput';
 import { ProgressBar } from '../components/ProgressBar';
 import {
@@ -130,7 +131,7 @@ export function Budgets() {
             onClick={() => void save()}
             disabled={saving || !dirty}
           >
-            {saving ? 'Saving…' : 'Save changes'}
+            <CheckIcon /> {saving ? 'Saving…' : 'Save changes'}
           </button>
         </div>
       </div>
