@@ -118,6 +118,8 @@ export function AccountDetail() {
   );
   // "Borrow again" deposits the borrowed money into a debit account.
   const borrowDests = accounts.filter((a) => a.type === 'debit');
+  // A transfer from this debit account needs another debit account to land in.
+  const otherDebits = accounts.filter((a) => a.type === 'debit' && a.id !== account.id);
   const negative = account.balanceCents < 0;
 
   return (
@@ -141,6 +143,20 @@ export function AccountDetail() {
           <button className="btn" onClick={() => setEditOpen(true)}>
             Edit
           </button>
+          {account.type === 'debit' && (
+            <button
+              className="btn"
+              onClick={() => setTransferModal({ open: true, editing: null })}
+              disabled={otherDebits.length === 0}
+              title={
+                otherDebits.length === 0
+                  ? 'Add another debit account to transfer to'
+                  : undefined
+              }
+            >
+              Transfer
+            </button>
+          )}
           {/* Debit & credit can add a transaction (credit = expense/purchase only,
               wired below); loans are managed purely via Pay. */}
           {account.type !== 'loan' && (
@@ -350,6 +366,7 @@ export function AccountDetail() {
         <TransferModal
           initial={transferModal.editing}
           accounts={accounts}
+          defaultFromAccountId={account.id}
           onClose={() => setTransferModal({ open: false, editing: null })}
           onSaved={afterMutation}
         />

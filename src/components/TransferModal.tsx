@@ -8,16 +8,24 @@ import { MoneyInput } from './MoneyInput';
 export function TransferModal({
   initial,
   accounts,
+  defaultFromAccountId,
   onClose,
   onSaved,
 }: {
   initial: Transfer | null;
   accounts: Account[];
+  // When creating a new transfer, preselect this account as the source
+  // (e.g. opened from a debit account's detail page). Ignored when editing.
+  defaultFromAccountId?: number;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const [fromId, setFromId] = useState<string>(
-    initial?.fromAccountId != null ? String(initial.fromAccountId) : ''
+    initial?.fromAccountId != null
+      ? String(initial.fromAccountId)
+      : defaultFromAccountId != null
+        ? String(defaultFromAccountId)
+        : ''
   );
   const [toId, setToId] = useState<string>(
     initial?.toAccountId != null ? String(initial.toAccountId) : ''
