@@ -38,21 +38,24 @@ function previewAmount(code: string): string {
   }
 }
 
-// Account settings page (/settings): currency + password behind ONE explicit
-// "Save changes" (same manual-save model as Budgets), and a visually separated
-// danger zone whose delete flow is progressively disclosed and — for accounts
-// with a password — re-confirmed with it.
+// Account settings page (/settings): currency and password each live in their
+// own card with their own Save button (independent saves), plus a visually
+// separated danger zone whose delete flow is progressively disclosed and — for
+// accounts with a password — re-confirmed with it.
 export function Settings({ user, refreshUser }: { user: User; refreshUser: () => void }) {
   const savedCurrency = (user.currency || 'USD').toUpperCase();
   const needsCurrent = user.hasPassword;
 
   const [currency, setCurrency] = useState(savedCurrency);
+  const [savingCurrency, setSavingCurrency] = useState(false);
+  const [currencyError, setCurrencyError] = useState('');
+
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [confirmPw, setConfirmPw] = useState('');
   const [show, setShow] = useState(false);
   const [pwError, setPwError] = useState('');
-  const [saving, setSaving] = useState(false);
+  const [savingPassword, setSavingPassword] = useState(false);
 
   // Danger zone: the delete confirmation is revealed on demand.
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -80,53 +83,58 @@ export function Settings({ user, refreshUser }: { user: User; refreshUser: () =>
     return () => window.removeEventListener('beforeunload', handler);
   }, [dirty]);
 
-  const save = async () => {
-    setPwError('');
-    const wantsPassword = next !== '' || confirmPw !== '';
-    if (wantsPassword) {
-      if (next.length < 8) {
-        setPwError('New password must be at least 8 characters');
-        return;
-      }
-      if (next !== confirmPw) {
-        setPwError('New passwords do not match');
-        return;
-      }
-      if (needsCurrent && current === '') {
-        setPwError('Enter your current password');
-        return;
-      }
-    }
-    if (!currencyDirty && !wantsPassword) return;
-
-    setSaving(true);
-    const saved: string[] = [];
+  const saveCurrency = async () => {
+    setCurrencyError('');
+    if (!currencyDirty) return;
+    setSavingCurrency(true);
     try {
-      // Currency first: changing the password rotates the CSRF token, so it
-      // must be the LAST authenticated call before the refresh below.
-      if (currencyDirty) {
-        await api.auth.setCurrency(currency);
-        saved.push('currency');
-      }
-      if (wantsPassword) {
-        await api.auth.changePassword(needsCurrent ? current : '', next);
-        saved.push('password');
-        setCurrent('');
-        setNext('');
-        setConfirmPw('');
-      }
-      refreshUser(); // re-syncs user (and the rotated CSRF token) app-wide
-      toast.success(`Saved ${saved.join(' and ')}`);
+      await api.auth.setCurrency(currency);
+      refreshUser();
+      toast.success('Currency saved');
     } catch (err) {
-      setPwError(cleanError(err));
+      setCurrencyError(cleanError(err));
     } finally {
-      setSaving(false);
+      setSavingCurrency(false);
     }
   };
 
-  const submit = (e: FormEvent) => {
+  const savePassword = async () => {
+    setPwError('');
+    if (!passwordDirty) return;
+    if (next.length < 8) {
+      setPwError('New password must be at least 8 characters');
+      return;
+    }
+    if (next !== confirmPw) {
+      setPwError('New passwords do not match');
+      return;
+    }
+    if (needsCurrent && current === '') {
+      setPwError('Enter your current password');
+      return;
+    }
+    setSavingPassword(true);
+    try {
+      await api.auth.changePassword(needsCurrent ? current : '', next);
+      setCurrent('');
+      setNext('');
+      setConfirmPw('');
+      refreshUser(); // re-syncs user (and the rotated CSRF token) app-wide
+      toast.success('Password saved');
+    } catch (err) {
+      setPwError(cleanError(err));
+    } finally {
+      setSavingPassword(false);
+    }
+  };
+
+  const submitCurrency = (e: FormEvent) => {
     e.preventDefault();
-    void save();
+    void saveCurrency();
+  };
+  const submitPassword = (e: FormEvent) => {
+    e.preventDefault();
+    void savePassword();
   };
 
   const deleteAccount = async () => {
@@ -153,16 +161,6 @@ export function Settings({ user, refreshUser }: { user: User; refreshUser: () =>
           <h1 className="page-title">Settings</h1>
           <div className="page-sub">Your account and preferences</div>
         </div>
-        <div className="head-actions">
-          {dirty && <span className="unsaved-hint">● Unsaved changes</span>}
-          <button
-            className="btn btn-primary"
-            onClick={() => void save()}
-            disabled={saving || !dirty}
-          >
-            {saving ? 'Saving…' : 'Save changes'}
-          </button>
-        </div>
       </div>
 
       <div className="settings-grid">
@@ -176,9 +174,9 @@ export function Settings({ user, refreshUser }: { user: User; refreshUser: () =>
           </div>
         </div>
 
-        <form className="panel form-grid" onSubmit={submit}>
+        <form className="panel form-grid" onSubmit={submitCurrency}>
           <div className="panel-title" style={{ marginBottom: 0 }}>
-            Preferences
+            Currency
           </div>
           <div className="field">
             <label htmlFor="set-currency">Display currency</label>
@@ -193,8 +191,21 @@ export function Settings({ user, refreshUser }: { user: User; refreshUser: () =>
               Example: {previewAmount(currency)} · changes how all amounts display.
             </div>
           </div>
+          {currencyError && <div className="form-error">{currencyError}</div>}
+          <div className="form-actions">
+            {currencyDirty && <span className="unsaved-hint">● Unsaved</span>}
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={savingCurrency || !currencyDirty}
+            >
+              {savingCurrency ? 'Saving…' : 'Save currency'}
+            </button>
+          </div>
+        </form>
 
-          <div className="panel-title" style={{ margin: '10px 0 0' }}>
+        <form className="panel form-grid" onSubmit={submitPassword}>
+          <div className="panel-title" style={{ marginBottom: 0 }}>
             {needsCurrent ? 'Change password' : 'Set a password'}
           </div>
           {!needsCurrent && (
@@ -251,8 +262,16 @@ export function Settings({ user, refreshUser }: { user: User; refreshUser: () =>
           </div>
 
           {pwError && <div className="form-error">{pwError}</div>}
-          {/* Hidden submit lets Enter trigger Save from any field. */}
-          <button type="submit" hidden aria-hidden="true" tabIndex={-1} />
+          <div className="form-actions">
+            {passwordDirty && <span className="unsaved-hint">● Unsaved</span>}
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={savingPassword || !passwordDirty}
+            >
+              {savingPassword ? 'Saving…' : needsCurrent ? 'Change password' : 'Set password'}
+            </button>
+          </div>
         </form>
 
         <div className="panel danger-panel">
