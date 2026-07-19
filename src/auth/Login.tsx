@@ -203,7 +203,7 @@ export function Login({
                   autoFocus
                 />
               </div>
-              {error && <div className="form-error">{error}</div>}
+              {error && <div className="form-error" role="alert">{error}</div>}
               <button type="submit" className="btn btn-primary btn-block" disabled={busy}>
                 {busy ? 'Sending…' : 'Send reset link'}
               </button>
@@ -277,7 +277,7 @@ export function Login({
                 </div>
               </div>
 
-              {error && <div className="form-error">{error}</div>}
+              {error && <div className="form-error" role="alert">{error}</div>}
 
               <button type="submit" className="btn btn-primary btn-block" disabled={busy}>
                 {busy ? 'Please wait…' : mode === 'signin' ? 'Sign in' : 'Create account'}

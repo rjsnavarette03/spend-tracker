@@ -107,7 +107,11 @@ final class Http
 
         $sfs = $_SERVER['HTTP_SEC_FETCH_SITE'] ?? '';
         if (is_string($sfs) && $sfs !== '') {
-            if ($sfs === 'same-origin' || $sfs === 'same-site') {
+            // The SPA and API share one origin, so genuine app requests are
+            // always 'same-origin'. Reject 'same-site' too: it would let a
+            // sibling subdomain (e.g. after an XSS or subdomain takeover) drive
+            // the token-less pre-auth routes → login/registration CSRF.
+            if ($sfs === 'same-origin') {
                 return;
             }
             throw new ApiError('Cross-origin request rejected', 403);
@@ -150,6 +154,13 @@ final class Http
         $row = DB::one('SELECT attempts, window_start FROM auth_throttle WHERE tkey = ?', [$key]);
         if ($row !== null && ($now - (int)$row['window_start']) < $windowSec) {
             if ((int)$row['attempts'] >= $maxAttempts) {
+                // Tell the client how long to wait. index.php buffers output via
+                // ob_start(); Http::json()'s ob_clean() drops buffered body, not
+                // already-queued headers, so this survives to the response.
+                $retry = max(1, $windowSec - ($now - (int)$row['window_start']));
+                if (!headers_sent()) {
+                    header('Retry-After: ' . $retry);
+                }
                 throw new ApiError('Too many attempts. Please try again later.', 429);
             }
             DB::exec('UPDATE auth_throttle SET attempts = attempts + 1 WHERE tkey = ?', [$key]);

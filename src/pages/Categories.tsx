@@ -8,9 +8,11 @@ import { cleanError } from '../format';
 
 export function Categories({
   categories,
+  loaded,
   onDataChanged,
 }: {
   categories: Category[];
+  loaded: boolean;
   onDataChanged: () => void;
 }) {
   const [modal, setModal] = useState<{ open: boolean; editing: Category | null; type: TxType }>({
@@ -99,10 +101,14 @@ export function Categories({
           <div className="page-sub">Organize where your money comes from and goes</div>
         </div>
       </div>
-      <div className="grid-2-even">
-        {section('expense', 'Expense categories')}
-        {section('income', 'Income categories')}
-      </div>
+      {!loaded ? (
+        <div className="empty-state">Loading…</div>
+      ) : (
+        <div className="grid-2-even">
+          {section('expense', 'Expense categories')}
+          {section('income', 'Income categories')}
+        </div>
+      )}
 
       {modal.open && (
         <CategoryModal

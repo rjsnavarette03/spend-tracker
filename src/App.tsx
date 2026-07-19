@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { NavLink, Outlet, useNavigate, useOutletContext } from 'react-router-dom';
 import type { Account, Category, User } from '../shared/types';
 import { api } from './api';
+import { ChunkBoundary } from './components/ChunkBoundary';
 import { ThemeToggle } from './components/ThemeToggle';
 import {
   BankIcon,
@@ -26,6 +27,10 @@ export interface AppContext {
   setPeriod: (p: Period) => void;
   categories: Category[];
   accounts: Account[];
+  // False until the first fetch of each list settles, so pages can show a
+  // loading state instead of flashing a false "no data / add your first" empty.
+  accountsLoaded: boolean;
+  categoriesLoaded: boolean;
   // Years that have transactions — drives the year picker (see PeriodPicker).
   availableYears: number[];
   onDataChanged: () => void;
@@ -75,6 +80,8 @@ export default function AppLayout({ user, onLogout }: { user: User; onLogout: ()
   };
   const [categories, setCategories] = useState<Category[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [accountsLoaded, setAccountsLoaded] = useState(false);
+  const [categoriesLoaded, setCategoriesLoaded] = useState(false);
   const [availableYears, setAvailableYears] = useState<number[]>([]);
   // Local copy so hasPassword/hasGoogle/currency can refresh after /settings changes.
   const [account, setAccount] = useState<User>(user);
@@ -84,6 +91,8 @@ export default function AppLayout({ user, onLogout }: { user: User; onLogout: ()
       setCategories(await api.categories.list());
     } catch {
       // pages surface real errors; a failed refresh here is non-fatal
+    } finally {
+      setCategoriesLoaded(true);
     }
   }, []);
 
@@ -94,6 +103,8 @@ export default function AppLayout({ user, onLogout }: { user: User; onLogout: ()
       setAccounts(await api.accounts.list());
     } catch {
       // non-fatal
+    } finally {
+      setAccountsLoaded(true);
     }
   }, []);
 
@@ -133,6 +144,8 @@ export default function AppLayout({ user, onLogout }: { user: User; onLogout: ()
     setPeriod,
     categories,
     accounts,
+    accountsLoaded,
+    categoriesLoaded,
     availableYears,
     onDataChanged,
     user: account,
@@ -228,7 +241,11 @@ export default function AppLayout({ user, onLogout }: { user: User; onLogout: ()
         </div>
       </aside>
       <main className="main">
-        <Outlet context={ctx} />
+        <ChunkBoundary>
+          <Suspense fallback={<div className="loading">Loading…</div>}>
+            <Outlet context={ctx} />
+          </Suspense>
+        </ChunkBoundary>
       </main>
 
       {/* Mobile-only bottom tab bar (hidden on desktop). */}

@@ -134,7 +134,7 @@ export function VerifyEmail({
           </div>
           {linkFailed ? (
             <div className="form-grid">
-              {error && <div className="form-error">{error}</div>}
+              {error && <div className="form-error" role="alert">{error}</div>}
               <button type="button" className="btn btn-primary btn-block" onClick={onCancel}>
                 Back to sign in
               </button>
@@ -181,7 +181,7 @@ export function VerifyEmail({
             />
           </div>
 
-          {error && <div className="form-error">{error}</div>}
+          {error && <div className="form-error" role="alert">{error}</div>}
           {notice && <div className="notice notice-block">{notice}</div>}
 
           <button

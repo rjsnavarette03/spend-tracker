@@ -92,7 +92,7 @@ export function ResetPassword({
             />
           </div>
 
-          {error && <div className="form-error">{error}</div>}
+          {error && <div className="form-error" role="alert">{error}</div>}
 
           <button type="submit" className="btn btn-primary btn-block" disabled={busy}>
             {busy ? 'Saving…' : 'Reset password'}

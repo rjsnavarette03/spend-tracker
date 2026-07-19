@@ -19,9 +19,8 @@
 // under the 20/IP/hr registration throttle.
 //
 // FINDINGS (verified in source before writing — see the console banner too):
-//   • Rate limiting IS implemented (429) but responses carry NO Retry-After
-//     header — §7 documents this gap instead of asserting a header that
-//     doesn't exist.
+//   • Rate limiting IS implemented (429) and responses now carry a Retry-After
+//     header (seconds until the window resets) — §7 asserts it.
 //   • Idempotency is NOT implemented — a retried create duplicates. §4
 //     documents the real behaviour rather than a passing no-dup test.
 //   • Pagination is NOT implemented (fixed LIMIT 2000, no page/offset/sort).
@@ -560,13 +559,16 @@ const suffix = `${Date.now()}${Math.floor(Math.random() * 1e6)}`;
   // --- 7c. The 429 fails gracefully (JSON error, not a crash) ---
   check('rate: 429 body is a graceful JSON error (not a 500/HTML crash)', typeof blocked.data?.error === 'string' && blocked.data.error.length > 0, JSON.stringify(blocked.data));
 
-  // --- 7d. Retry-After header (KNOWN GAP — not implemented) ---
-  // The spec asks for Retry-After; the API does not currently emit it. This
-  // documents the ACTUAL behaviour rather than asserting a header that is
-  // absent (which would only fail).
+  // --- 7d. Retry-After header (seconds until the window resets) ---
+  // Http::throttle now emits Retry-After on the 429 so clients can back off
+  // correctly. It must be a positive integer no greater than the window.
   const retryAfter = blocked.headers.get('retry-after');
-  check('rate: 429 currently omits Retry-After header (documented gap)', retryAfter === null, `got "${retryAfter}"`);
-  note('RETRY-AFTER NOT IMPLEMENTED: 429 responses have no Retry-After header. Recommend adding it (seconds until window reset) so clients back off correctly.');
+  const retrySecs = Number(retryAfter);
+  check(
+    'rate: 429 carries a Retry-After header (positive integer, ≤ window)',
+    retryAfter !== null && Number.isInteger(retrySecs) && retrySecs >= 1 && retrySecs <= 600,
+    `got "${retryAfter}"`
+  );
   note('WINDOW RESET (login = 600s) is time-based; not exercised here to keep the suite fast. The fixed-window logic in Http::throttle resets once (now - window_start) >= windowSec.');
 
   // --- 7e. The block is per-account, not global (a different email still works) ---

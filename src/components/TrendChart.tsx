@@ -18,8 +18,17 @@ export function TrendChart({ data }: { data: MonthlySummary[] }) {
   const group = W / data.length;
   const barW = Math.min(26, group * 0.28);
 
+  const summary = `Income vs expenses over ${data.length} months: ${data
+    .map((d) => `${shortMonthLabel(d.month)} income ${fmtMoney(d.incomeCents)}, expenses ${fmtMoney(d.expenseCents)}`)
+    .join('; ')}`;
+
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }} role="img">
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      style={{ width: '100%', height: 'auto', display: 'block' }}
+      role="img"
+      aria-label={summary}
+    >
       {[0.25, 0.5, 0.75, 1].map((f) => (
         <line
           key={f}

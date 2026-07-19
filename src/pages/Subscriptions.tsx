@@ -390,7 +390,7 @@ function SubscriptionModal({
 
         <div className="field">
           <label>Billing cycle</label>
-          <div className="segmented" role="tablist">
+          <div className="segmented" role="group" aria-label="Billing cycle">
             <button
               type="button"
               className={cycle === 'monthly' ? 'active-account' : ''}
@@ -493,7 +493,7 @@ function SubscriptionModal({
           </select>
         </div>
 
-        {error && <div className="form-error">{error}</div>}
+        {error && <div className="form-error" role="alert">{error}</div>}
 
         <div className="form-actions">
           <button type="button" className="btn" onClick={onClose}>

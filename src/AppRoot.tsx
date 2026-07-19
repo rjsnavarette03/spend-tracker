@@ -1,21 +1,27 @@
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, useCallback, useEffect, useState } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import type { User } from '../shared/types';
 import { api, AUTH_EXPIRED_EVENT } from './api';
 import AppLayout, { useAppContext } from './App';
+// Marketing, legal, and auth screens stay eager so the public landing and the
+// signed-out flows paint instantly with no chunk fetch or Suspense flash.
 import { Login } from './auth/Login';
 import { ResetPassword } from './auth/ResetPassword';
 import { VerifyEmail } from './auth/VerifyEmail';
-import { AccountDetail } from './pages/AccountDetail';
-import { Accounts } from './pages/Accounts';
-import { Budgets } from './pages/Budgets';
-import { Categories } from './pages/Categories';
-import { Dashboard } from './pages/Dashboard';
 import { Landing } from './pages/Landing';
 import { LegalPage } from './pages/Legal';
-import { Settings } from './pages/Settings';
-import { Subscriptions } from './pages/Subscriptions';
-import { Transactions } from './pages/Transactions';
+
+// The signed-in app pages are code-split: an anonymous visitor never downloads
+// them, and each loads on first navigation (behind the layout's Suspense +
+// ChunkBoundary). Pages use named exports, hence the .then() interop.
+const AccountDetail = lazy(() => import('./pages/AccountDetail').then((m) => ({ default: m.AccountDetail })));
+const Accounts = lazy(() => import('./pages/Accounts').then((m) => ({ default: m.Accounts })));
+const Budgets = lazy(() => import('./pages/Budgets').then((m) => ({ default: m.Budgets })));
+const Categories = lazy(() => import('./pages/Categories').then((m) => ({ default: m.Categories })));
+const Dashboard = lazy(() => import('./pages/Dashboard').then((m) => ({ default: m.Dashboard })));
+const Settings = lazy(() => import('./pages/Settings').then((m) => ({ default: m.Settings })));
+const Subscriptions = lazy(() => import('./pages/Subscriptions').then((m) => ({ default: m.Subscriptions })));
+const Transactions = lazy(() => import('./pages/Transactions').then((m) => ({ default: m.Transactions })));
 
 type Phase = 'loading' | 'anon' | 'authed' | 'offline';
 
@@ -81,14 +87,16 @@ function TransactionsPage() {
 }
 function AccountsPage() {
   const c = useAppContext();
-  return <Accounts accounts={c.accounts} onDataChanged={c.onDataChanged} />;
+  return <Accounts accounts={c.accounts} loaded={c.accountsLoaded} onDataChanged={c.onDataChanged} />;
 }
 function BudgetsPage() {
   return <Budgets />;
 }
 function CategoriesPage() {
   const c = useAppContext();
-  return <Categories categories={c.categories} onDataChanged={c.onDataChanged} />;
+  return (
+    <Categories categories={c.categories} loaded={c.categoriesLoaded} onDataChanged={c.onDataChanged} />
+  );
 }
 function SettingsPage() {
   const c = useAppContext();

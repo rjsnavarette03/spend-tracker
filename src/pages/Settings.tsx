@@ -191,7 +191,7 @@ export function Settings({ user, refreshUser }: { user: User; refreshUser: () =>
               Example: {previewAmount(currency)} · changes how all amounts display.
             </div>
           </div>
-          {currencyError && <div className="form-error">{currencyError}</div>}
+          {currencyError && <div className="form-error" role="alert">{currencyError}</div>}
           <div className="form-actions">
             {currencyDirty && <span className="unsaved-hint">● Unsaved</span>}
             <button
@@ -261,7 +261,7 @@ export function Settings({ user, refreshUser }: { user: User; refreshUser: () =>
             />
           </div>
 
-          {pwError && <div className="form-error">{pwError}</div>}
+          {pwError && <div className="form-error" role="alert">{pwError}</div>}
           <div className="form-actions">
             {passwordDirty && <span className="unsaved-hint">● Unsaved</span>}
             <button
@@ -303,7 +303,7 @@ export function Settings({ user, refreshUser }: { user: User; refreshUser: () =>
                   You're signed in with Google — confirming below deletes the account immediately.
                 </p>
               )}
-              {deleteError && <div className="form-error">{deleteError}</div>}
+              {deleteError && <div className="form-error" role="alert">{deleteError}</div>}
               <div className="form-actions" style={{ justifyContent: 'flex-start' }}>
                 <button
                   type="button"

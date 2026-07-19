@@ -201,7 +201,7 @@ export function AccountEditModal({
 
         <div className="field">
           <label>Type</label>
-          <div className="segmented">
+          <div className="segmented" role="group" aria-label="Account type">
             {/* Type is immutable once set, so when editing show only the
                 account's own type; when creating, offer all three. */}
             {(initial ? [type] : (Object.keys(TYPE_LABELS) as AccountType[])).map((t) => (
@@ -314,7 +314,7 @@ export function AccountEditModal({
 
         <div className="field">
           <label>Appearance</label>
-          <div className="segmented">
+          <div className="segmented" role="group" aria-label="Appearance">
             <button
               type="button"
               className={mode === 'color' ? 'active-account' : ''}
@@ -389,7 +389,7 @@ export function AccountEditModal({
           )}
         </div>
 
-        {error && <div className="form-error">{error}</div>}
+        {error && <div className="form-error" role="alert">{error}</div>}
 
         <div className="form-actions">
           <button type="button" className="btn" onClick={onClose}>

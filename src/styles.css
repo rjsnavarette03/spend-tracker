@@ -94,6 +94,22 @@ body {
   user-select: none;
 }
 
+/* The native-app chrome (nav, buttons, labels) stays unselectable, but real
+   CONTENT must be copyable — in a finance app users need to grab amounts,
+   notes, names, dates and their own email. Re-enable text selection for the
+   main content area, tables, and read-only value text. */
+.main,
+.table,
+.note-cell,
+.num,
+.stat-value,
+.donut-legend,
+.account-email,
+.account-balance-value,
+.networth-value {
+  user-select: text;
+}
+
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;

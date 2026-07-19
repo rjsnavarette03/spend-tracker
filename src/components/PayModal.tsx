@@ -130,7 +130,7 @@ export function PayModal({
           to {account.name} — the fee doesn't reduce what you owe.
         </div>
 
-        {error && <div className="form-error">{error}</div>}
+        {error && <div className="form-error" role="alert">{error}</div>}
 
         <div className="form-actions">
           <button type="button" className="btn" onClick={onClose}>

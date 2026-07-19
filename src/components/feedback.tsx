@@ -96,7 +96,11 @@ export function UiHost() {
       {toasts.length > 0 && (
         <div className="toast-container" role="region" aria-label="Notifications">
           {toasts.map((t) => (
-            <div key={t.id} className={`toast toast-${t.kind}`} role="status">
+            <div
+              key={t.id}
+              className={`toast toast-${t.kind}`}
+              role={t.kind === 'error' ? 'alert' : 'status'}
+            >
               <span className="toast-message">{t.message}</span>
               <button
                 type="button"

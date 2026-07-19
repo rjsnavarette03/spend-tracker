@@ -79,7 +79,7 @@ export function CategoryModal({
           </div>
         </div>
 
-        {error && <div className="form-error">{error}</div>}
+        {error && <div className="form-error" role="alert">{error}</div>}
 
         <div className="form-actions">
           <button type="button" className="btn" onClick={onClose}>

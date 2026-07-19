@@ -116,7 +116,7 @@ export function TransactionModal({
     <Modal title={initial ? 'Edit transaction' : 'Add transaction'} onClose={onClose}>
       <form className="form-grid" onSubmit={submit}>
         {!lockType && (
-          <div className="segmented" role="tablist">
+          <div className="segmented" role="group" aria-label="Transaction type">
             <button
               type="button"
               className={type === 'expense' ? 'active-expense' : ''}
@@ -205,7 +205,7 @@ export function TransactionModal({
           />
         </div>
 
-        {error && <div className="form-error">{error}</div>}
+        {error && <div className="form-error" role="alert">{error}</div>}
 
         <div className="form-actions">
           <button type="button" className="btn" onClick={onClose}>

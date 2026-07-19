@@ -79,7 +79,7 @@ export function PeriodPicker({
 
   return (
     <div className="period-picker">
-      <div className="segmented gran-segmented">
+      <div className="segmented gran-segmented" role="group" aria-label="Period granularity">
         {GRANULARITIES.map(({ g, label }) => (
           <button
             key={g}

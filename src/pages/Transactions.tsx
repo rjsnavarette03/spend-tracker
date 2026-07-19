@@ -216,7 +216,9 @@ export function Transactions({
         {notice && <span className="notice">{notice}</span>}
       </div>
 
-      {loaded && paged.matchedCount === 0 ? (
+      {!loaded ? (
+        <div className="empty-state">Loading…</div>
+      ) : paged.matchedCount === 0 ? (
         <div className="empty-state">
           {paged.totalCount === 0 ? (
             <>

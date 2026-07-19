@@ -12,9 +12,13 @@ export function DonutChart({ rows }: { rows: BreakdownRow[] }) {
   const C = 2 * Math.PI * R;
   let acc = 0;
 
+  const summary = `Spending by category, total ${fmtMoney(total)}: ${rows
+    .map((r) => `${r.name} ${Math.round((r.totalCents / total) * 100)}%`)
+    .join(', ')}`;
+
   return (
     <div className="donut-wrap">
-      <svg viewBox="0 0 180 180" role="img">
+      <svg viewBox="0 0 180 180" role="img" aria-label={summary}>
         <circle cx={90} cy={90} r={R} fill="none" stroke="var(--surface-3)" strokeWidth={26} />
         {rows.map((r) => {
           const frac = r.totalCents / total;

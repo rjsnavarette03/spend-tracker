@@ -114,9 +114,11 @@ function sortAccounts(list: Account[], sort: AccountSort): Account[] {
 
 export function Accounts({
   accounts,
+  loaded,
   onDataChanged,
 }: {
   accounts: Account[];
+  loaded: boolean;
   onDataChanged: () => void;
 }) {
   const navigate = useNavigate();
@@ -202,7 +204,9 @@ export function Accounts({
         </div>
       </div>
 
-      {accounts.length === 0 ? (
+      {!loaded ? (
+        <div className="empty-state">Loading…</div>
+      ) : accounts.length === 0 ? (
         <div className="empty-state">
           No accounts yet. Add your bank accounts, e-wallets, credit cards and loans — expenses
           and income can then be tied to an account, and balances update automatically.
