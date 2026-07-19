@@ -9,15 +9,78 @@ import { DueTag } from '../components/DueTag';
 import { PayModal } from '../components/PayModal';
 import { TransactionModal } from '../components/TransactionModal';
 import { TransferModal } from '../components/TransferModal';
+import { Pager } from '../components/Pager';
 import { PencilIcon, TrashIcon } from '../components/Icons';
 import { cleanError, dateLabel, fmtMoney } from '../format';
 import { confirm, toast } from '../components/feedback';
+import { usePagedTable } from '../usePagedTable';
+import type { SortOption } from '../usePagedTable';
 
 const TYPE_LABELS: Record<string, string> = {
   debit: 'Debit',
   credit: 'Credit',
   loan: 'Loan / Borrowed',
 };
+
+// This account's transactions: search matches note + category (the account is
+// fixed here, so it isn't part of the search). Sort choices bake in direction.
+const DETAIL_TX_SEARCH = (t: Transaction) => `${t.note} ${t.categoryName ?? ''}`;
+const DETAIL_TX_SORTS: SortOption<Transaction>[] = [
+  {
+    value: 'date-desc',
+    label: 'Date (newest)',
+    compare: (a, b) => b.date.localeCompare(a.date) || b.id - a.id,
+  },
+  {
+    value: 'date-asc',
+    label: 'Date (oldest)',
+    compare: (a, b) => a.date.localeCompare(b.date) || a.id - b.id,
+  },
+  {
+    value: 'amount-desc',
+    label: 'Amount (high–low)',
+    compare: (a, b) => b.amountCents - a.amountCents,
+  },
+  {
+    value: 'amount-asc',
+    label: 'Amount (low–high)',
+    compare: (a, b) => a.amountCents - b.amountCents,
+  },
+  {
+    value: 'cat-asc',
+    label: 'Category (A–Z)',
+    compare: (a, b) =>
+      (a.categoryName ?? 'Uncategorized').localeCompare(b.categoryName ?? 'Uncategorized', undefined, {
+        sensitivity: 'base',
+      }),
+  },
+];
+
+// Transfers & payments involving this account: search matches note + the other
+// account names.
+const DETAIL_TRANSFER_SEARCH = (t: Transfer) => `${t.note} ${t.fromName ?? ''} ${t.toName ?? ''}`;
+const DETAIL_TRANSFER_SORTS: SortOption<Transfer>[] = [
+  {
+    value: 'date-desc',
+    label: 'Date (newest)',
+    compare: (a, b) => b.date.localeCompare(a.date) || b.id - a.id,
+  },
+  {
+    value: 'date-asc',
+    label: 'Date (oldest)',
+    compare: (a, b) => a.date.localeCompare(b.date) || a.id - b.id,
+  },
+  {
+    value: 'amount-desc',
+    label: 'Amount (high–low)',
+    compare: (a, b) => b.amountCents - a.amountCents,
+  },
+  {
+    value: 'amount-asc',
+    label: 'Amount (low–high)',
+    compare: (a, b) => a.amountCents - b.amountCents,
+  },
+];
 
 export function AccountDetail() {
   const { period, categories, accounts, onDataChanged } = useAppContext();
@@ -39,6 +102,13 @@ export function AccountDetail() {
     editing: null,
   });
   const [editOpen, setEditOpen] = useState(false);
+
+  const pagedTxs = usePagedTable(txs, DETAIL_TX_SEARCH, DETAIL_TX_SORTS, {
+    initialSort: 'date-desc',
+  });
+  const pagedTransfers = usePagedTable(transfers, DETAIL_TRANSFER_SEARCH, DETAIL_TRANSFER_SORTS, {
+    initialSort: 'date-desc',
+  });
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -213,13 +283,39 @@ export function AccountDetail() {
       </div>
 
       <div className="panel mt-panel">
-        <div className="panel-title">Transactions</div>
+        <div className="panel-head">
+          <div className="panel-title">Transactions</div>
+          {txs.length > 0 && (
+            <div className="table-controls">
+              <select
+                aria-label="Sort transactions"
+                value={pagedTxs.sort}
+                onChange={(e) => pagedTxs.setSort(e.target.value)}
+              >
+                {DETAIL_TX_SORTS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="search"
+                placeholder="Search transactions…"
+                value={pagedTxs.query}
+                onChange={(e) => pagedTxs.setQuery(e.target.value)}
+              />
+            </div>
+          )}
+        </div>
         {!loaded ? (
           <div className="empty-state">Loading…</div>
         ) : txs.length === 0 ? (
           <div className="empty-state">No transactions linked to this account yet.</div>
+        ) : pagedTxs.matchedCount === 0 ? (
+          <div className="empty-state">No transactions match your search.</div>
         ) : (
           /* tx-cards: ≤860px CSS restacks each row into a native-app list card */
+          <>
           <table className="table tx-cards">
             <thead>
               <tr>
@@ -231,7 +327,7 @@ export function AccountDetail() {
               </tr>
             </thead>
             <tbody>
-              {txs.map((t) => (
+              {pagedTxs.visible.map((t) => (
                 <tr key={t.id}>
                   <td style={{ whiteSpace: 'nowrap' }}>{dateLabel(t.date)}</td>
                   <td>
@@ -268,17 +364,55 @@ export function AccountDetail() {
               ))}
             </tbody>
           </table>
+          <Pager
+            page={pagedTxs.page}
+            pageCount={pagedTxs.pageCount}
+            pageSize={pagedTxs.pageSize}
+            setPage={pagedTxs.setPage}
+            setPageSize={pagedTxs.setPageSize}
+            rangeStart={pagedTxs.rangeStart}
+            rangeEnd={pagedTxs.rangeEnd}
+            total={pagedTxs.matchedCount}
+            unit="transactions"
+          />
+          </>
         )}
       </div>
 
       <div className="panel mt-panel">
-        <div className="panel-title">Transfers &amp; payments</div>
+        <div className="panel-head">
+          <div className="panel-title">Transfers &amp; payments</div>
+          {transfers.length > 0 && (
+            <div className="table-controls">
+              <select
+                aria-label="Sort transfers"
+                value={pagedTransfers.sort}
+                onChange={(e) => pagedTransfers.setSort(e.target.value)}
+              >
+                {DETAIL_TRANSFER_SORTS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="search"
+                placeholder="Search transfers…"
+                value={pagedTransfers.query}
+                onChange={(e) => pagedTransfers.setQuery(e.target.value)}
+              />
+            </div>
+          )}
+        </div>
         {!loaded ? (
           <div className="empty-state">Loading…</div>
         ) : transfers.length === 0 ? (
           <div className="empty-state">No transfers or payments involving this account yet.</div>
+        ) : pagedTransfers.matchedCount === 0 ? (
+          <div className="empty-state">No transfers match your search.</div>
         ) : (
           /* detail-transfers: ≤860px CSS restacks rows into list cards */
+          <>
           <table className="table detail-transfers">
             <thead>
               <tr>
@@ -289,7 +423,7 @@ export function AccountDetail() {
               </tr>
             </thead>
             <tbody>
-              {transfers.map((tr) => {
+              {pagedTransfers.visible.map((tr) => {
                 const incoming = tr.toAccountId === id;
                 // What actually moves for THIS account: incoming = +amount;
                 // outgoing = −(amount + fee), since the fee also leaves the source.
@@ -331,6 +465,18 @@ export function AccountDetail() {
               })}
             </tbody>
           </table>
+          <Pager
+            page={pagedTransfers.page}
+            pageCount={pagedTransfers.pageCount}
+            pageSize={pagedTransfers.pageSize}
+            setPage={pagedTransfers.setPage}
+            setPageSize={pagedTransfers.setPageSize}
+            rangeStart={pagedTransfers.rangeStart}
+            rangeEnd={pagedTransfers.rangeEnd}
+            total={pagedTransfers.matchedCount}
+            unit="transfers"
+          />
+          </>
         )}
       </div>
 

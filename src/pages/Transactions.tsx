@@ -3,6 +3,7 @@ import type { Account, Category, Transaction, TxType } from '../../shared/types'
 import { api } from '../api';
 import { confirm, toast } from '../components/feedback';
 import { DownloadIcon, PencilIcon, PlusIcon, TrashIcon } from '../components/Icons';
+import { Pager } from '../components/Pager';
 import { PeriodPicker } from '../components/PeriodPicker';
 import { TransactionModal } from '../components/TransactionModal';
 import {
@@ -15,6 +16,43 @@ import {
   transactionsToCsv,
 } from '../format';
 import type { Period } from '../format';
+import { usePagedTable } from '../usePagedTable';
+import type { SortOption } from '../usePagedTable';
+
+// Search matches the note, category and account name; sort choices bake in
+// their direction (matching the accounts-page sort dropdown pattern).
+const TX_SEARCH = (t: Transaction) => `${t.note} ${t.categoryName ?? ''} ${t.accountName ?? ''}`;
+
+const TX_SORTS: SortOption<Transaction>[] = [
+  {
+    value: 'date-desc',
+    label: 'Date (newest)',
+    compare: (a, b) => b.date.localeCompare(a.date) || b.id - a.id,
+  },
+  {
+    value: 'date-asc',
+    label: 'Date (oldest)',
+    compare: (a, b) => a.date.localeCompare(b.date) || a.id - b.id,
+  },
+  {
+    value: 'amount-desc',
+    label: 'Amount (high–low)',
+    compare: (a, b) => b.amountCents - a.amountCents,
+  },
+  {
+    value: 'amount-asc',
+    label: 'Amount (low–high)',
+    compare: (a, b) => a.amountCents - b.amountCents,
+  },
+  {
+    value: 'cat-asc',
+    label: 'Category (A–Z)',
+    compare: (a, b) =>
+      (a.categoryName ?? 'Uncategorized').localeCompare(b.categoryName ?? 'Uncategorized', undefined, {
+        sensitivity: 'base',
+      }),
+  },
+];
 
 export function Transactions({
   period,
@@ -35,20 +73,15 @@ export function Transactions({
   const [loaded, setLoaded] = useState(false);
   const [typeFilter, setTypeFilter] = useState<TxType | 'all'>('all');
   const [catFilter, setCatFilter] = useState<string>('all');
-  const [search, setSearch] = useState('');
-  // Debounced copy of `search` — the network query keys off this, not every
-  // keystroke, so typing fires one request after a pause instead of many.
-  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [modal, setModal] = useState<{ open: boolean; editing: Transaction | null }>({
     open: false,
     editing: null,
   });
   const [notice, setNotice] = useState('');
 
-  useEffect(() => {
-    const id = setTimeout(() => setDebouncedSearch(search), 250);
-    return () => clearTimeout(id);
-  }, [search]);
+  // Type/category/period stay server-side filters; search + sort + pagination
+  // run client-side over the loaded rows so they reflect instantly.
+  const paged = usePagedTable(txs, TX_SEARCH, TX_SORTS, { initialSort: 'date-desc' });
 
   // Monotonic request id: a slow earlier response can resolve after a newer
   // one, so ignore any result that isn't from the latest request in flight.
@@ -61,7 +94,6 @@ export function Transactions({
         to: period.end,
         type: typeFilter,
         categoryId: catFilter === 'all' ? 'all' : Number(catFilter),
-        search: debouncedSearch,
       });
       if (seq !== reqSeq.current) return; // superseded — drop stale result
       setTxs(rows);
@@ -69,7 +101,7 @@ export function Transactions({
     } catch (err) {
       if (seq === reqSeq.current) toast.error(cleanError(err));
     }
-  }, [period, typeFilter, catFilter, debouncedSearch]);
+  }, [period, typeFilter, catFilter]);
 
   useEffect(() => {
     void load();
@@ -97,18 +129,23 @@ export function Transactions({
     }
   };
 
+  // Export / totals cover the full matched set (all pages, after search), not
+  // just the current page.
+  const matched = paged.matched;
   const exportCsv = () => {
     downloadFile(
       `transactions-${period.start}_${period.end}.csv`,
-      transactionsToCsv(txs),
+      transactionsToCsv(matched),
       'text/csv;charset=utf-8'
     );
-    setNotice(`Exported ${txs.length} ${txs.length === 1 ? 'entry' : 'entries'}`);
+    setNotice(`Exported ${matched.length} ${matched.length === 1 ? 'entry' : 'entries'}`);
     setTimeout(() => setNotice(''), 4000);
   };
 
-  const incomeTotal = txs.filter((t) => t.type === 'income').reduce((s, t) => s + t.amountCents, 0);
-  const expenseTotal = txs
+  const incomeTotal = matched
+    .filter((t) => t.type === 'income')
+    .reduce((s, t) => s + t.amountCents, 0);
+  const expenseTotal = matched
     .filter((t) => t.type === 'expense')
     .reduce((s, t) => s + t.amountCents, 0);
 
@@ -118,7 +155,8 @@ export function Transactions({
         <div>
           <h1 className="page-title">Transactions</h1>
           <div className="page-sub">
-            {txs.length} {txs.length === 1 ? 'entry' : 'entries'} in {periodLabel(period)}
+            {paged.matchedCount} {paged.matchedCount === 1 ? 'entry' : 'entries'}
+            {paged.query ? ' matched' : ''} in {periodLabel(period)}
           </div>
         </div>
         <div className="head-actions">
@@ -157,26 +195,44 @@ export function Transactions({
             </option>
           ))}
         </select>
+        <select
+          aria-label="Sort transactions"
+          value={paged.sort}
+          onChange={(e) => paged.setSort(e.target.value)}
+        >
+          {TX_SORTS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
         <input
           type="search"
-          placeholder="Search note or category…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search note, category or account…"
+          value={paged.query}
+          onChange={(e) => paged.setQuery(e.target.value)}
         />
         <div className="spacer" />
         {notice && <span className="notice">{notice}</span>}
       </div>
 
-      {loaded && txs.length === 0 ? (
+      {loaded && paged.matchedCount === 0 ? (
         <div className="empty-state">
-          No transactions match. Try a different period or filter, or add one.
-          <br />
-          <button
-            className="btn btn-primary"
-            onClick={() => setModal({ open: true, editing: null })}
-          >
-            <PlusIcon /> Add transaction
-          </button>
+          {paged.totalCount === 0 ? (
+            <>
+              No transactions in {periodLabel(period)}. Try a different period or filter, or add
+              one.
+              <br />
+              <button
+                className="btn btn-primary"
+                onClick={() => setModal({ open: true, editing: null })}
+              >
+                <PlusIcon /> Add transaction
+              </button>
+            </>
+          ) : (
+            'No transactions match your search.'
+          )}
         </div>
       ) : (
         <div className="panel table-panel">
@@ -192,7 +248,7 @@ export function Transactions({
               </tr>
             </thead>
             <tbody>
-              {txs.map((t) => (
+              {paged.visible.map((t) => (
                 <tr key={t.id}>
                   <td style={{ whiteSpace: 'nowrap' }}>{dateLabel(t.date)}</td>
                   <td>
@@ -244,6 +300,17 @@ export function Transactions({
               Net <b>{fmtMoney(incomeTotal - expenseTotal)}</b>
             </span>
           </div>
+          <Pager
+            page={paged.page}
+            pageCount={paged.pageCount}
+            pageSize={paged.pageSize}
+            setPage={paged.setPage}
+            setPageSize={paged.setPageSize}
+            rangeStart={paged.rangeStart}
+            rangeEnd={paged.rangeEnd}
+            total={paged.matchedCount}
+            unit="entries"
+          />
         </div>
       )}
 

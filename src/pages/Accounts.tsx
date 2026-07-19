@@ -6,8 +6,38 @@ import { confirm, toast } from '../components/feedback';
 import { AccountEditModal } from '../components/AccountEditModal';
 import { DueTag } from '../components/DueTag';
 import { PencilIcon, PlusIcon, TransferIcon, TrashIcon } from '../components/Icons';
+import { Pager } from '../components/Pager';
 import { TransferModal } from '../components/TransferModal';
 import { cleanError, dateLabel, fmtMoney, nextDueInfo } from '../format';
+import { usePagedTable } from '../usePagedTable';
+import type { SortOption } from '../usePagedTable';
+
+// Transfers list: search matches the note and both account names; sort choices
+// bake in direction (same pattern as the per-section account sort above).
+const TRANSFER_SEARCH = (t: Transfer) => `${t.note} ${t.fromName ?? ''} ${t.toName ?? ''}`;
+
+const TRANSFER_SORTS: SortOption<Transfer>[] = [
+  {
+    value: 'date-desc',
+    label: 'Date (newest)',
+    compare: (a, b) => b.date.localeCompare(a.date) || b.id - a.id,
+  },
+  {
+    value: 'date-asc',
+    label: 'Date (oldest)',
+    compare: (a, b) => a.date.localeCompare(b.date) || a.id - b.id,
+  },
+  {
+    value: 'amount-desc',
+    label: 'Amount (high–low)',
+    compare: (a, b) => b.amountCents - a.amountCents,
+  },
+  {
+    value: 'amount-asc',
+    label: 'Amount (low–high)',
+    compare: (a, b) => a.amountCents - b.amountCents,
+  },
+];
 
 const SECTIONS: Array<{ type: AccountType; title: string; hint: string }> = [
   { type: 'debit', title: 'Debit', hint: 'Cash, banks & e-wallets' },
@@ -99,6 +129,9 @@ export function Accounts({
   const [transferModal, setTransferModal] = useState<{ open: boolean; editing: Transfer | null }>({
     open: false,
     editing: null,
+  });
+  const pagedTransfers = usePagedTable(transfers, TRANSFER_SEARCH, TRANSFER_SORTS, {
+    initialSort: 'date-desc',
   });
 
   const loadTransfers = useCallback(async () => {
@@ -349,14 +382,40 @@ export function Accounts({
       )}
 
       <div className="panel mt-panel">
-        <div className="panel-title">Transfers</div>
+        <div className="panel-head">
+          <div className="panel-title">Transfers</div>
+          {transfers.length > 0 && (
+            <div className="table-controls">
+              <select
+                aria-label="Sort transfers"
+                value={pagedTransfers.sort}
+                onChange={(e) => pagedTransfers.setSort(e.target.value)}
+              >
+                {TRANSFER_SORTS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="search"
+                placeholder="Search transfers…"
+                value={pagedTransfers.query}
+                onChange={(e) => pagedTransfers.setQuery(e.target.value)}
+              />
+            </div>
+          )}
+        </div>
         {transfers.length === 0 ? (
           <div className="empty-state">
             No transfers yet. Move money between accounts — with an optional fee — and both
             balances update automatically.
           </div>
+        ) : pagedTransfers.matchedCount === 0 ? (
+          <div className="empty-state">No transfers match your search.</div>
         ) : (
           /* transfers-cards: ≤860px CSS restacks each row into a list card */
+          <>
           <table className="table transfers-cards">
             <thead>
               <tr>
@@ -369,7 +428,7 @@ export function Accounts({
               </tr>
             </thead>
             <tbody>
-              {transfers.map((t) => (
+              {pagedTransfers.visible.map((t) => (
                 <tr key={t.id}>
                   <td style={{ whiteSpace: 'nowrap' }}>{dateLabel(t.date)}</td>
                   <td>
@@ -418,6 +477,18 @@ export function Accounts({
               ))}
             </tbody>
           </table>
+          <Pager
+            page={pagedTransfers.page}
+            pageCount={pagedTransfers.pageCount}
+            pageSize={pagedTransfers.pageSize}
+            setPage={pagedTransfers.setPage}
+            setPageSize={pagedTransfers.setPageSize}
+            rangeStart={pagedTransfers.rangeStart}
+            rangeEnd={pagedTransfers.rangeEnd}
+            total={pagedTransfers.matchedCount}
+            unit="transfers"
+          />
+          </>
         )}
       </div>
 

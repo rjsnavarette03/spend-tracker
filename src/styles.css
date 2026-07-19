@@ -1455,6 +1455,92 @@ select {
   overflow-x: auto;
 }
 
+/* ---------- table controls (search + sort) + pager ---------- */
+
+/* A control row placed above a table that has no page-level toolbar of its
+   own (e.g. the account-detail tables and the accounts transfers list). */
+.table-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.table-controls input[type='search'] {
+  width: 200px;
+}
+
+.table-controls select {
+  width: auto;
+}
+
+.table-controls .spacer {
+  flex: 1;
+}
+
+/* Panel header that carries a title on the left and controls on the right. */
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.panel-head .panel-title {
+  margin-bottom: 0;
+}
+
+.panel-head .table-controls {
+  margin-bottom: 0;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 14px 4px 2px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.pager-size {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.pager-size select {
+  width: auto;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.pager-range {
+  font-variant-numeric: tabular-nums;
+}
+
+.pager-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.pager-nav .btn-icon:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.pager-page {
+  font-variant-numeric: tabular-nums;
+  min-width: 46px;
+  text-align: center;
+}
+
 /* ---------- responsive (web) ---------- */
 
 @media (max-width: 860px) {
@@ -3363,5 +3449,29 @@ select.budget-cadence {
 
   .mt-panel {
     margin-top: 20px;
+  }
+}
+
+/* Table controls + pager on narrow screens: let the search fill the row and
+   keep the pager readable when it wraps. Placed at end of file so it wins over
+   the base rules above (equal specificity). */
+@media (max-width: 860px) {
+  .table-controls {
+    gap: 8px;
+  }
+
+  .table-controls input[type='search'] {
+    flex: 1 1 100%;
+    width: auto;
+    order: -1;
+  }
+
+  .table-controls select {
+    flex: 1 1 40%;
+    min-width: 0;
+  }
+
+  .pager {
+    gap: 12px 16px;
   }
 }
