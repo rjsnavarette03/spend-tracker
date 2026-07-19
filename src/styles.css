@@ -1308,6 +1308,15 @@ select {
   margin: 2px 0 0;
 }
 
+/* The section subtotal is the card's headline number — size it like a stat
+   value (between the 18px assets/liabilities and the 24px dashboard stats),
+   not like the 14px title text it sits next to. */
+.section-title-stacked > .num {
+  font-size: 19px;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
 .type-tag {
   font-size: 11px;
   font-weight: 700;
