@@ -4,6 +4,7 @@ import type { Transaction, Transfer } from '../../shared/types';
 import { api } from '../api';
 import { useAppContext } from '../App';
 import { AccountEditModal } from '../components/AccountEditModal';
+import { BorrowModal } from '../components/BorrowModal';
 import { DueTag } from '../components/DueTag';
 import { PayModal } from '../components/PayModal';
 import { TransactionModal } from '../components/TransactionModal';
@@ -28,6 +29,7 @@ export function AccountDetail() {
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
+  const [borrowOpen, setBorrowOpen] = useState(false);
   const [txModal, setTxModal] = useState<{ open: boolean; editing: Transaction | null }>({
     open: false,
     editing: null,
@@ -114,6 +116,8 @@ export function AccountDetail() {
   const paySources = accounts.filter(
     (a) => a.id !== account.id && (a.type === 'debit' || a.type === 'credit')
   );
+  // "Borrow again" deposits the borrowed money into a debit account.
+  const borrowDests = accounts.filter((a) => a.type === 'debit');
   const negative = account.balanceCents < 0;
 
   return (
@@ -145,6 +149,20 @@ export function AccountDetail() {
               onClick={() => setTxModal({ open: true, editing: null })}
             >
               Add transaction
+            </button>
+          )}
+          {account.type === 'loan' && (
+            <button
+              className="btn"
+              onClick={() => setBorrowOpen(true)}
+              disabled={borrowDests.length === 0}
+              title={
+                borrowDests.length === 0
+                  ? 'Add a debit account to receive the borrowed money'
+                  : undefined
+              }
+            >
+              Borrow again
             </button>
           )}
           {account.type !== 'debit' && (
@@ -305,6 +323,14 @@ export function AccountDetail() {
           account={account}
           accounts={accounts}
           onClose={() => setPayOpen(false)}
+          onSaved={afterMutation}
+        />
+      )}
+      {borrowOpen && (
+        <BorrowModal
+          account={account}
+          accounts={accounts}
+          onClose={() => setBorrowOpen(false)}
           onSaved={afterMutation}
         />
       )}
