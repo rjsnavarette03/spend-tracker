@@ -216,6 +216,27 @@ export function Transactions({
         {notice && <span className="notice">{notice}</span>}
       </div>
 
+      {/* Period totals for the current filter/search — same stat cards as the
+          dashboard: big colored numbers, above the table for at-a-glance reading. */}
+      {loaded && (
+        <div className="stat-grid">
+          <div className="stat-card">
+            <div className="stat-label">Income</div>
+            <div className="stat-value green">{fmtMoney(incomeTotal)}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Expenses</div>
+            <div className="stat-value red">{fmtMoney(expenseTotal)}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Net</div>
+            <div className={`stat-value ${incomeTotal - expenseTotal >= 0 ? 'green' : 'red'}`}>
+              {fmtMoney(incomeTotal - expenseTotal)}
+            </div>
+          </div>
+        </div>
+      )}
+
       {!loaded ? (
         <div className="empty-state">Loading…</div>
       ) : paged.matchedCount === 0 ? (
@@ -291,17 +312,6 @@ export function Transactions({
               ))}
             </tbody>
           </table>
-          <div className="totals-bar">
-            <span>
-              Income <b className="amount-income">{fmtMoney(incomeTotal)}</b>
-            </span>
-            <span>
-              Expenses <b className="amount-expense">{fmtMoney(expenseTotal)}</b>
-            </span>
-            <span>
-              Net <b>{fmtMoney(incomeTotal - expenseTotal)}</b>
-            </span>
-          </div>
           <Pager
             page={paged.page}
             pageCount={paged.pageCount}
