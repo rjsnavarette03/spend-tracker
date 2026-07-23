@@ -8,7 +8,7 @@ import { DueTag } from '../components/DueTag';
 import { PencilIcon, PlusIcon, TransferIcon, TrashIcon } from '../components/Icons';
 import { Pager } from '../components/Pager';
 import { TransferModal } from '../components/TransferModal';
-import { cleanError, dateLabel, fmtMoney, nextDueInfo } from '../format';
+import { cleanError, dateLabel, fmtMoney, nextDueInfo, timeLabel } from '../format';
 import { usePagedTable } from '../usePagedTable';
 import type { SortOption } from '../usePagedTable';
 
@@ -20,12 +20,18 @@ const TRANSFER_SORTS: SortOption<Transfer>[] = [
   {
     value: 'date-desc',
     label: 'Date (newest)',
-    compare: (a, b) => b.date.localeCompare(a.date) || b.id - a.id,
+    compare: (a, b) =>
+      b.date.localeCompare(a.date) ||
+      (b.time ?? '').localeCompare(a.time ?? '') ||
+      b.id - a.id,
   },
   {
     value: 'date-asc',
     label: 'Date (oldest)',
-    compare: (a, b) => a.date.localeCompare(b.date) || a.id - b.id,
+    compare: (a, b) =>
+      a.date.localeCompare(b.date) ||
+      (a.time ?? '').localeCompare(b.time ?? '') ||
+      a.id - b.id,
   },
   {
     value: 'amount-desc',
@@ -388,7 +394,10 @@ export function Accounts({
             <tbody>
               {pagedTransfers.visible.map((t) => (
                 <tr key={t.id}>
-                  <td style={{ whiteSpace: 'nowrap' }}>{dateLabel(t.date)}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    {dateLabel(t.date)}
+                    {t.time && <span className="time-dim"> · {timeLabel(t.time)}</span>}
+                  </td>
                   <td>
                     <span className="transfer-route">
                       <span className="cat-chip">

@@ -1,7 +1,7 @@
 import { FormEvent, useState } from 'react';
 import type { Account } from '../../shared/types';
 import { api } from '../api';
-import { cleanError, fmtMoney, parseAmountToCents, todayStr } from '../format';
+import { cleanError, fmtMoney, nowTimeHm, parseAmountToCents, todayStr } from '../format';
 import { CoinsIcon } from './Icons';
 import { Modal } from './Modal';
 import { MoneyInput } from './MoneyInput';
@@ -28,6 +28,7 @@ export function BorrowModal({
   const [amount, setAmount] = useState('');
   const [fee, setFee] = useState('');
   const [date, setDate] = useState(todayStr());
+  const [time, setTime] = useState(nowTimeHm());
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -68,6 +69,7 @@ export function BorrowModal({
         amountCents,
         feeCents,
         date,
+        time: time || null,
         note: note.trim() || `Borrowed from ${account.name}`,
       });
       onSaved();
@@ -109,14 +111,25 @@ export function BorrowModal({
           </div>
         </div>
 
-        <div className="field">
-          <label htmlFor="borrow-date">Date</label>
-          <input
-            id="borrow-date"
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-          />
+        <div className="form-row">
+          <div className="field">
+            <label htmlFor="borrow-date">Date</label>
+            <input
+              id="borrow-date"
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="borrow-time">Time (optional)</label>
+            <input
+              id="borrow-time"
+              type="time"
+              value={time}
+              onChange={(e) => setTime(e.target.value)}
+            />
+          </div>
         </div>
 
         <div className="field">

@@ -1,7 +1,7 @@
 import { FormEvent, useMemo, useState } from 'react';
 import type { Account, Category, Transaction, TxType } from '../../shared/types';
 import { api } from '../api';
-import { centsToInput, cleanError, fmtMoney, parseAmountToCents, todayStr } from '../format';
+import { centsToInput, cleanError, fmtMoney, nowTimeHm, parseAmountToCents, todayStr } from '../format';
 import { CheckIcon, PlusIcon } from './Icons';
 import { Modal } from './Modal';
 import { MoneyInput } from './MoneyInput';
@@ -32,6 +32,9 @@ export function TransactionModal({
   const [type, setType] = useState<TxType>(initial?.type ?? lockType ?? 'expense');
   const [amount, setAmount] = useState(initial ? centsToInput(initial.amountCents) : '');
   const [date, setDate] = useState(initial?.date ?? defaultDate);
+  // New transactions default to the current time (clear it for "no time");
+  // edits keep whatever was stored — legacy rows simply have none.
+  const [time, setTime] = useState(initial ? initial.time ?? '' : nowTimeHm());
   const [categoryId, setCategoryId] = useState<string>(
     initial?.categoryId != null ? String(initial.categoryId) : ''
   );
@@ -101,6 +104,7 @@ export function TransactionModal({
         categoryId: categoryId ? Number(categoryId) : null,
         accountId: accountId ? Number(accountId) : null,
         date,
+        time: time || null,
         note: note.trim(),
       };
       if (initial) await api.transactions.update(initial.id, data);
@@ -135,14 +139,19 @@ export function TransactionModal({
           </div>
         )}
 
+        <div className="field">
+          <label htmlFor="tx-amount">Amount</label>
+          <MoneyInput id="tx-amount" value={amount} onChange={setAmount} autoFocus />
+        </div>
+
         <div className="form-row">
-          <div className="field">
-            <label htmlFor="tx-amount">Amount</label>
-            <MoneyInput id="tx-amount" value={amount} onChange={setAmount} autoFocus />
-          </div>
           <div className="field">
             <label htmlFor="tx-date">Date</label>
             <input id="tx-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </div>
+          <div className="field">
+            <label htmlFor="tx-time">Time (optional)</label>
+            <input id="tx-time" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
           </div>
         </div>
 

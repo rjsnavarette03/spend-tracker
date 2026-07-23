@@ -18,7 +18,7 @@ import {
   TransferIcon,
   TrashIcon,
 } from '../components/Icons';
-import { cleanError, dateLabel, fmtMoney } from '../format';
+import { cleanError, dateLabel, fmtMoney, timeLabel } from '../format';
 import { confirm, toast } from '../components/feedback';
 import { usePagedTable } from '../usePagedTable';
 import type { SortOption } from '../usePagedTable';
@@ -36,12 +36,18 @@ const DETAIL_TX_SORTS: SortOption<Transaction>[] = [
   {
     value: 'date-desc',
     label: 'Date (newest)',
-    compare: (a, b) => b.date.localeCompare(a.date) || b.id - a.id,
+    compare: (a, b) =>
+      b.date.localeCompare(a.date) ||
+      (b.time ?? '').localeCompare(a.time ?? '') ||
+      b.id - a.id,
   },
   {
     value: 'date-asc',
     label: 'Date (oldest)',
-    compare: (a, b) => a.date.localeCompare(b.date) || a.id - b.id,
+    compare: (a, b) =>
+      a.date.localeCompare(b.date) ||
+      (a.time ?? '').localeCompare(b.time ?? '') ||
+      a.id - b.id,
   },
   {
     value: 'amount-desc',
@@ -70,12 +76,18 @@ const DETAIL_TRANSFER_SORTS: SortOption<Transfer>[] = [
   {
     value: 'date-desc',
     label: 'Date (newest)',
-    compare: (a, b) => b.date.localeCompare(a.date) || b.id - a.id,
+    compare: (a, b) =>
+      b.date.localeCompare(a.date) ||
+      (b.time ?? '').localeCompare(a.time ?? '') ||
+      b.id - a.id,
   },
   {
     value: 'date-asc',
     label: 'Date (oldest)',
-    compare: (a, b) => a.date.localeCompare(b.date) || a.id - b.id,
+    compare: (a, b) =>
+      a.date.localeCompare(b.date) ||
+      (a.time ?? '').localeCompare(b.time ?? '') ||
+      a.id - b.id,
   },
   {
     value: 'amount-desc',
@@ -367,7 +379,10 @@ export function AccountDetail() {
             <tbody>
               {pagedTxs.visible.map((t) => (
                 <tr key={t.id}>
-                  <td style={{ whiteSpace: 'nowrap' }}>{dateLabel(t.date)}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    {dateLabel(t.date)}
+                    {t.time && <span className="time-dim"> · {timeLabel(t.time)}</span>}
+                  </td>
                   <td>
                     <span className="cat-chip">
                       <span
@@ -471,7 +486,10 @@ export function AccountDetail() {
                   : tr.toName ?? 'Deleted account';
                 return (
                   <tr key={tr.id}>
-                    <td style={{ whiteSpace: 'nowrap' }}>{dateLabel(tr.date)}</td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      {dateLabel(tr.date)}
+                      {tr.time && <span className="time-dim"> · {timeLabel(tr.time)}</span>}
+                    </td>
                     <td>
                       {incoming ? 'From ' : 'To '}
                       {other}

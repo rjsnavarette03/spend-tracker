@@ -6,6 +6,7 @@ import type {
   Category,
   MonthlySummary,
   Transaction,
+  Transfer,
 } from '../../shared/types';
 import { api } from '../api';
 import { toast } from '../components/feedback';
@@ -24,15 +25,23 @@ import {
   fmtMoney,
   fmtSigned,
   periodLabel,
+  timeLabel,
 } from '../format';
 import type { Period } from '../format';
+
+// The recent list mirrors the Transactions ledger: transfers (loan/credit
+// payments, borrows, moves) appear alongside transactions, newest first.
+type RecentRow = { kind: 'tx'; t: Transaction } | { kind: 'transfer'; tr: Transfer };
+const rowDate = (r: RecentRow) => (r.kind === 'tx' ? r.t.date : r.tr.date);
+const rowTime = (r: RecentRow) => (r.kind === 'tx' ? r.t.time ?? '' : r.tr.time ?? '');
+const rowId = (r: RecentRow) => (r.kind === 'tx' ? r.t.id : r.tr.id);
 
 interface DashboardData {
   summary: MonthlySummary;
   trend: MonthlySummary[];
   breakdown: BreakdownRow[];
   budgets: Budget[];
-  recent: Transaction[];
+  recent: RecentRow[];
 }
 
 export function Dashboard({
@@ -59,14 +68,27 @@ export function Dashboard({
 
   const load = useCallback(async () => {
     try {
-      const [summary, trend, breakdown, budgets, txs] = await Promise.all([
+      const [summary, trend, breakdown, budgets, txs, allTransfers] = await Promise.all([
         api.reports.summary(period.start, period.end),
         api.reports.trend(budgetMonth, 6),
         api.reports.breakdown(period.start, period.end, 'expense'),
         api.budgets.list(),
         api.transactions.list({ from: period.start, to: period.end }),
+        // GET /transfers has no date-range filter; clip to the period here.
+        api.transfers.list(),
       ]);
-      setData({ summary, trend, breakdown, budgets, recent: txs.slice(0, 8) });
+      const merged: RecentRow[] = [
+        ...txs.map((t): RecentRow => ({ kind: 'tx', t })),
+        ...allTransfers
+          .filter((tr) => tr.date >= period.start && tr.date <= period.end)
+          .map((tr): RecentRow => ({ kind: 'transfer', tr })),
+      ].sort(
+        (a, b) =>
+          rowDate(b).localeCompare(rowDate(a)) ||
+          rowTime(b).localeCompare(rowTime(a)) ||
+          rowId(b) - rowId(a)
+      );
+      setData({ summary, trend, breakdown, budgets, recent: merged.slice(0, 8) });
     } catch (err) {
       toast.error(cleanError(err));
     }
@@ -90,6 +112,16 @@ export function Dashboard({
   const onTrack = activeBudgets.length - overCount;
   const savingsRate = summary.incomeCents > 0 ? Math.round((net / summary.incomeCents) * 100) : null;
   const topBudgets = [...activeBudgets].sort((a, b) => b.amountCents - a.amountCents).slice(0, 5);
+
+  // Payment = money sent to a debt account; Borrowed = money taken out of a
+  // loan. Falls back to "Transfer" (incl. when an account was deleted).
+  const accountType = (id: number | null) => accounts.find((a) => a.id === id)?.type;
+  const transferBadge = (tr: Transfer): string => {
+    const to = accountType(tr.toAccountId);
+    if (to === 'credit' || to === 'loan') return 'Payment';
+    if (accountType(tr.fromAccountId) === 'loan') return 'Borrowed';
+    return 'Transfer';
+  };
 
   return (
     <div>
@@ -195,7 +227,7 @@ export function Dashboard({
           )}
         </div>
         <div className="panel">
-          <div className="panel-title">Recent transactions</div>
+          <div className="panel-title">Recent activity</div>
           {recent.length === 0 ? (
             <div className="empty-state">
               Nothing recorded in {periodLabel(period)}.
@@ -208,24 +240,68 @@ export function Dashboard({
             /* recent-table: ≤860px CSS restacks rows (note hidden — glance list) */
             <table className="table recent-table">
               <tbody>
-                {recent.map((t) => (
-                  <tr key={t.id}>
-                    <td style={{ whiteSpace: 'nowrap', color: 'var(--text-dim)' }}>
-                      {dateLabel(t.date)}
-                    </td>
-                    <td>
-                      <span className="cat-chip">
+                {recent.map((r) =>
+                  r.kind === 'tx' ? (
+                    <tr key={`tx-${r.t.id}`}>
+                      <td style={{ whiteSpace: 'nowrap', color: 'var(--text-dim)' }}>
+                        {dateLabel(r.t.date)}
+                        {r.t.time && <span className="time-dim"> · {timeLabel(r.t.time)}</span>}
+                      </td>
+                      <td>
+                        <span className="cat-chip">
+                          <span
+                            className="color-dot"
+                            style={{ background: r.t.categoryColor ?? '#64748b' }}
+                          />
+                          <span>{r.t.categoryName ?? 'Uncategorized'}</span>
+                        </span>
+                      </td>
+                      <td className="note-cell">{r.t.note}</td>
+                      <td className={`num amount-${r.t.type}`}>
+                        {fmtSigned(r.t.amountCents, r.t.type)}
+                      </td>
+                    </tr>
+                  ) : (
+                    <tr key={`tr-${r.tr.id}`}>
+                      <td style={{ whiteSpace: 'nowrap', color: 'var(--text-dim)' }}>
+                        {dateLabel(r.tr.date)}
+                        {r.tr.time && <span className="time-dim"> · {timeLabel(r.tr.time)}</span>}
+                      </td>
+                      <td>
                         <span
-                          className="color-dot"
-                          style={{ background: t.categoryColor ?? '#64748b' }}
-                        />
-                        <span>{t.categoryName ?? 'Uncategorized'}</span>
-                      </span>
-                    </td>
-                    <td className="note-cell">{t.note}</td>
-                    <td className={`num amount-${t.type}`}>{fmtSigned(t.amountCents, t.type)}</td>
-                  </tr>
-                ))}
+                          className="cat-chip"
+                          title={`${r.tr.fromName ?? 'Deleted account'} → ${r.tr.toName ?? 'Deleted account'}`}
+                        >
+                          <TransferIcon size={13} />
+                          <span>{transferBadge(r.tr)}</span>
+                        </span>
+                      </td>
+                      {/* Glance list: fall back to the route when there's no note. */}
+                      <td className="note-cell">
+                        {r.tr.note ||
+                          `${r.tr.fromName ?? 'Deleted account'} → ${r.tr.toName ?? 'Deleted account'}`}
+                      </td>
+                      {/* Cash perspective: a Payment drains spendable money (red −),
+                          a Borrow adds to it (green +); a plain move stays neutral. */}
+                      <td
+                        className={`num ${
+                          transferBadge(r.tr) === 'Payment'
+                            ? 'amount-expense'
+                            : transferBadge(r.tr) === 'Borrowed'
+                              ? 'amount-income'
+                              : ''
+                        }`}
+                      >
+                        {transferBadge(r.tr) === 'Payment'
+                          ? '−'
+                          : transferBadge(r.tr) === 'Borrowed'
+                            ? '+'
+                            : ''}
+                        {fmtMoney(r.tr.amountCents)}
+                      </td>
+                    </tr>
+                  )
+                )}
               </tbody>
             </table>
           )}

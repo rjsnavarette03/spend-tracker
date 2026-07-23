@@ -1566,6 +1566,12 @@ select {
   text-align: center;
 }
 
+/* Time-of-day shown after a transaction's date — subordinate to the date. */
+.time-dim {
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
 /* ---------- responsive (web) ---------- */
 
 @media (max-width: 860px) {

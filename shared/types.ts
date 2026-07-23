@@ -57,6 +57,7 @@ export interface Transfer {
   amountCents: number;
   feeCents: number;
   date: string; // YYYY-MM-DD
+  time: string | null; // optional 'HH:MM', same convention as Transaction.time
   note: string;
   fromName: string | null;
   fromColor: string | null;
@@ -70,6 +71,7 @@ export interface TransferInput {
   amountCents: number;
   feeCents: number;
   date: string; // YYYY-MM-DD
+  time: string | null; // 'HH:MM' or null
   note: string;
 }
 
@@ -80,6 +82,9 @@ export interface Transaction {
   categoryId: number | null;
   accountId: number | null;
   date: string; // YYYY-MM-DD
+  // Optional time-of-day, 24h 'HH:MM' (client-local, same string convention
+  // as date). NULL on rows that predate the feature / subscription charges.
+  time: string | null;
   note: string;
   categoryName: string | null;
   categoryColor: string | null;
@@ -93,6 +98,7 @@ export interface TxInput {
   categoryId: number | null;
   accountId: number | null;
   date: string; // YYYY-MM-DD
+  time: string | null; // 'HH:MM' or null
   note: string;
 }
 

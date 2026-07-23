@@ -1,7 +1,7 @@
 import { FormEvent, useState } from 'react';
 import type { Account, Transfer } from '../../shared/types';
 import { api } from '../api';
-import { centsToInput, cleanError, fmtMoney, parseAmountToCents, todayStr } from '../format';
+import { centsToInput, cleanError, fmtMoney, nowTimeHm, parseAmountToCents, todayStr } from '../format';
 import { CheckIcon, TransferIcon } from './Icons';
 import { Modal } from './Modal';
 import { MoneyInput } from './MoneyInput';
@@ -34,6 +34,8 @@ export function TransferModal({
   const [amount, setAmount] = useState(initial ? centsToInput(initial.amountCents) : '');
   const [fee, setFee] = useState(initial && initial.feeCents > 0 ? centsToInput(initial.feeCents) : '');
   const [date, setDate] = useState(initial?.date ?? todayStr());
+  // New transfers default to the current time; edits keep the stored value.
+  const [time, setTime] = useState(initial ? initial.time ?? '' : nowTimeHm());
   const [note, setNote] = useState(initial?.note ?? '');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -88,6 +90,7 @@ export function TransferModal({
         amountCents,
         feeCents,
         date,
+        time: time || null,
         note: note.trim(),
       };
       if (initial) await api.transfers.update(initial.id, data);
@@ -139,9 +142,15 @@ export function TransferModal({
           </div>
         </div>
 
-        <div className="field">
-          <label htmlFor="tf-date">Date</label>
-          <input id="tf-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        <div className="form-row">
+          <div className="field">
+            <label htmlFor="tf-date">Date</label>
+            <input id="tf-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </div>
+          <div className="field">
+            <label htmlFor="tf-time">Time (optional)</label>
+            <input id="tf-time" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+          </div>
         </div>
 
         <div className="field">

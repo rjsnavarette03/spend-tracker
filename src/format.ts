@@ -344,6 +344,21 @@ export function dateLabel(date: string): string {
   });
 }
 
+/** '14:35' → '2:35 PM'. Input is the 24h HH:MM stored on transactions. */
+export function timeLabel(hm: string): string {
+  const [h, m] = hm.split(':').map(Number);
+  return new Date(2000, 0, 1, h, m).toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+/** The device's current time as 24h 'HH:MM' — the add-transaction default. */
+export function nowTimeHm(): string {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
 /** 1 → "1st", 22 → "22nd", 13 → "13th". */
 export function ordinal(n: number): string {
   const v = n % 100;

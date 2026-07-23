@@ -1,58 +1,107 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Account, Category, Transaction, TxType } from '../../shared/types';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { Account, Category, Transaction, Transfer, TxType } from '../../shared/types';
 import { api } from '../api';
 import { confirm, toast } from '../components/feedback';
-import { DownloadIcon, PencilIcon, PlusIcon, TrashIcon } from '../components/Icons';
+import { DownloadIcon, PencilIcon, PlusIcon, TransferIcon, TrashIcon } from '../components/Icons';
 import { Pager } from '../components/Pager';
 import { PeriodPicker } from '../components/PeriodPicker';
 import { TransactionModal } from '../components/TransactionModal';
-import {
-  cleanError,
-  dateLabel,
-  downloadFile,
-  fmtMoney,
-  fmtSigned,
-  periodLabel,
-  transactionsToCsv,
-} from '../format';
+import { TransferModal } from '../components/TransferModal';
+import { cleanError, dateLabel, downloadFile, fmtMoney, fmtSigned, periodLabel, timeLabel } from '../format';
 import type { Period } from '../format';
 import { usePagedTable } from '../usePagedTable';
 import type { SortOption } from '../usePagedTable';
 
-// Search matches the note, category and account name; sort choices bake in
-// their direction (matching the accounts-page sort dropdown pattern).
-const TX_SEARCH = (t: Transaction) => `${t.note} ${t.categoryName ?? ''} ${t.accountName ?? ''}`;
+// The ledger interleaves ordinary transactions with transfers (loan/credit
+// payments, borrows, account-to-account moves). Transfers appear as rows but
+// are EXCLUDED from the Income/Expenses/Net totals: they move money between
+// the user's own accounts, so counting them would double-count spending.
+type Row = { kind: 'tx'; t: Transaction } | { kind: 'transfer'; tr: Transfer };
 
-const TX_SORTS: SortOption<Transaction>[] = [
+const rowId = (r: Row) => (r.kind === 'tx' ? r.t.id : r.tr.id);
+const rowDate = (r: Row) => (r.kind === 'tx' ? r.t.date : r.tr.date);
+// 'HH:MM' sorts lexicographically; '' (no time) sorts before any time, so
+// untimed rows land last on newest-first — matching the server.
+const rowTime = (r: Row) => (r.kind === 'tx' ? r.t.time ?? '' : r.tr.time ?? '');
+const rowAmount = (r: Row) => (r.kind === 'tx' ? r.t.amountCents : r.tr.amountCents);
+const rowCatLabel = (r: Row) =>
+  r.kind === 'tx' ? r.t.categoryName ?? 'Uncategorized' : 'Transfer';
+
+// Search matches note, category, account names — and for transfers the words
+// "transfer"/"payment" so typing either surfaces them.
+const ROW_SEARCH = (r: Row) =>
+  r.kind === 'tx'
+    ? `${r.t.note} ${r.t.categoryName ?? ''} ${r.t.accountName ?? ''}`
+    : `${r.tr.note} ${r.tr.fromName ?? ''} ${r.tr.toName ?? ''} transfer payment`;
+
+const ROW_SORTS: SortOption<Row>[] = [
   {
     value: 'date-desc',
     label: 'Date (newest)',
-    compare: (a, b) => b.date.localeCompare(a.date) || b.id - a.id,
+    compare: (a, b) =>
+      rowDate(b).localeCompare(rowDate(a)) ||
+      rowTime(b).localeCompare(rowTime(a)) ||
+      rowId(b) - rowId(a),
   },
   {
     value: 'date-asc',
     label: 'Date (oldest)',
-    compare: (a, b) => a.date.localeCompare(b.date) || a.id - b.id,
+    compare: (a, b) =>
+      rowDate(a).localeCompare(rowDate(b)) ||
+      rowTime(a).localeCompare(rowTime(b)) ||
+      rowId(a) - rowId(b),
   },
   {
     value: 'amount-desc',
     label: 'Amount (high–low)',
-    compare: (a, b) => b.amountCents - a.amountCents,
+    compare: (a, b) => rowAmount(b) - rowAmount(a),
   },
   {
     value: 'amount-asc',
     label: 'Amount (low–high)',
-    compare: (a, b) => a.amountCents - b.amountCents,
+    compare: (a, b) => rowAmount(a) - rowAmount(b),
   },
   {
     value: 'cat-asc',
     label: 'Category (A–Z)',
-    compare: (a, b) =>
-      (a.categoryName ?? 'Uncategorized').localeCompare(b.categoryName ?? 'Uncategorized', undefined, {
-        sensitivity: 'base',
-      }),
+    compare: (a, b) => rowCatLabel(a).localeCompare(rowCatLabel(b), undefined, { sensitivity: 'base' }),
   },
 ];
+
+function rowsToCsv(rows: Row[]): string {
+  const esc = (v: string) => `"${String(v).replace(/"/g, '""')}"`;
+  const lines = ['Date,Time,Type,Category,Account,Note,Amount'];
+  for (const r of rows) {
+    if (r.kind === 'tx') {
+      const t = r.t;
+      lines.push(
+        [
+          t.date,
+          t.time ?? '',
+          t.type,
+          esc(t.categoryName ?? 'Uncategorized'),
+          esc(t.accountName ?? ''),
+          esc(t.note),
+          (t.amountCents / 100).toFixed(2),
+        ].join(',')
+      );
+    } else {
+      const tr = r.tr;
+      lines.push(
+        [
+          tr.date,
+          tr.time ?? '',
+          'transfer',
+          esc('Transfer'),
+          esc(`${tr.fromName ?? 'Deleted account'} → ${tr.toName ?? 'Deleted account'}`),
+          esc(tr.feeCents > 0 ? `${tr.note} (fee ${(tr.feeCents / 100).toFixed(2)})` : tr.note),
+          (tr.amountCents / 100).toFixed(2),
+        ].join(',')
+      );
+    }
+  }
+  return '﻿' + lines.join('\r\n');
+}
 
 export function Transactions({
   period,
@@ -70,18 +119,34 @@ export function Transactions({
   onDataChanged: () => void;
 }) {
   const [txs, setTxs] = useState<Transaction[]>([]);
+  const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [typeFilter, setTypeFilter] = useState<TxType | 'all'>('all');
+  const [typeFilter, setTypeFilter] = useState<TxType | 'all' | 'transfer'>('all');
   const [catFilter, setCatFilter] = useState<string>('all');
   const [modal, setModal] = useState<{ open: boolean; editing: Transaction | null }>({
     open: false,
     editing: null,
   });
+  const [transferModal, setTransferModal] = useState<{ open: boolean; editing: Transfer | null }>({
+    open: false,
+    editing: null,
+  });
   const [notice, setNotice] = useState('');
+
+  // Transfers join the list only on "All types" / "Transfers & payments", and
+  // never under a category filter (transfers have no category).
+  const includeTransfers = (typeFilter === 'all' || typeFilter === 'transfer') && catFilter === 'all';
+
+  const rows = useMemo<Row[]>(() => {
+    const out: Row[] = [];
+    if (typeFilter !== 'transfer') for (const t of txs) out.push({ kind: 'tx', t });
+    if (includeTransfers) for (const tr of transfers) out.push({ kind: 'transfer', tr });
+    return out;
+  }, [txs, transfers, typeFilter, includeTransfers]);
 
   // Type/category/period stay server-side filters; search + sort + pagination
   // run client-side over the loaded rows so they reflect instantly.
-  const paged = usePagedTable(txs, TX_SEARCH, TX_SORTS, { initialSort: 'date-desc' });
+  const paged = usePagedTable(rows, ROW_SEARCH, ROW_SORTS, { initialSort: 'date-desc' });
 
   // Monotonic request id: a slow earlier response can resolve after a newer
   // one, so ignore any result that isn't from the latest request in flight.
@@ -89,14 +154,21 @@ export function Transactions({
   const load = useCallback(async () => {
     const seq = ++reqSeq.current;
     try {
-      const rows = await api.transactions.list({
-        from: period.start,
-        to: period.end,
-        type: typeFilter,
-        categoryId: catFilter === 'all' ? 'all' : Number(catFilter),
-      });
+      const [t, allTransfers] = await Promise.all([
+        typeFilter === 'transfer'
+          ? Promise.resolve([] as Transaction[])
+          : api.transactions.list({
+              from: period.start,
+              to: period.end,
+              type: typeFilter,
+              categoryId: catFilter === 'all' ? 'all' : Number(catFilter),
+            }),
+        // GET /transfers has no date-range filter; clip to the period here.
+        api.transfers.list(),
+      ]);
       if (seq !== reqSeq.current) return; // superseded — drop stale result
-      setTxs(rows);
+      setTxs(t);
+      setTransfers(allTransfers.filter((tr) => tr.date >= period.start && tr.date <= period.end));
       setLoaded(true);
     } catch (err) {
       if (seq === reqSeq.current) toast.error(cleanError(err));
@@ -129,13 +201,40 @@ export function Transactions({
     }
   };
 
+  const removeTransfer = async (tr: Transfer) => {
+    const ok = await confirm({
+      title: 'Delete transfer',
+      message: `Delete this transfer of ${fmtMoney(tr.amountCents)}? Both account balances update.`,
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api.transfers.remove(tr.id);
+      afterMutation();
+    } catch (err) {
+      toast.error(cleanError(err));
+    }
+  };
+
+  // Payment = money sent to a debt account; Borrowed = money taken out of a
+  // loan. Falls back to "Transfer" (incl. when an account was deleted).
+  const accountType = (id: number | null) => accounts.find((a) => a.id === id)?.type;
+  const transferBadge = (tr: Transfer): string => {
+    const to = accountType(tr.toAccountId);
+    if (to === 'credit' || to === 'loan') return 'Payment';
+    if (accountType(tr.fromAccountId) === 'loan') return 'Borrowed';
+    return 'Transfer';
+  };
+
   // Export / totals cover the full matched set (all pages, after search), not
-  // just the current page.
+  // just the current page. Totals count REAL income/spending only — transfers
+  // and payments move money between the user's own accounts.
   const matched = paged.matched;
   const exportCsv = () => {
     downloadFile(
       `transactions-${period.start}_${period.end}.csv`,
-      transactionsToCsv(matched),
+      rowsToCsv(matched),
       'text/csv;charset=utf-8'
     );
     setNotice(`Exported ${matched.length} ${matched.length === 1 ? 'entry' : 'entries'}`);
@@ -143,11 +242,11 @@ export function Transactions({
   };
 
   const incomeTotal = matched
-    .filter((t) => t.type === 'income')
-    .reduce((s, t) => s + t.amountCents, 0);
+    .filter((r): r is Row & { kind: 'tx' } => r.kind === 'tx' && r.t.type === 'income')
+    .reduce((s, r) => s + r.t.amountCents, 0);
   const expenseTotal = matched
-    .filter((t) => t.type === 'expense')
-    .reduce((s, t) => s + t.amountCents, 0);
+    .filter((r): r is Row & { kind: 'tx' } => r.kind === 'tx' && r.t.type === 'expense')
+    .reduce((s, r) => s + r.t.amountCents, 0);
 
   return (
     <div>
@@ -160,7 +259,7 @@ export function Transactions({
           </div>
         </div>
         <div className="head-actions">
-          <button className="btn" onClick={exportCsv} disabled={txs.length === 0}>
+          <button className="btn" onClick={exportCsv} disabled={matched.length === 0}>
             <DownloadIcon /> Export CSV
           </button>
           <button
@@ -177,11 +276,12 @@ export function Transactions({
         <select
           aria-label="Filter by type"
           value={typeFilter}
-          onChange={(e) => setTypeFilter(e.target.value as TxType | 'all')}
+          onChange={(e) => setTypeFilter(e.target.value as TxType | 'all' | 'transfer')}
         >
           <option value="all">All types</option>
           <option value="income">Income</option>
           <option value="expense">Expenses</option>
+          <option value="transfer">Transfers &amp; payments</option>
         </select>
         <select
           aria-label="Filter by category"
@@ -200,7 +300,7 @@ export function Transactions({
           value={paged.sort}
           onChange={(e) => paged.setSort(e.target.value)}
         >
-          {TX_SORTS.map((o) => (
+          {ROW_SORTS.map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
             </option>
@@ -217,7 +317,7 @@ export function Transactions({
       </div>
 
       {/* Period totals for the current filter/search — same stat cards as the
-          dashboard: big colored numbers, above the table for at-a-glance reading. */}
+          dashboard. Transfers/payments are listed below but never counted here. */}
       {loaded && (
         <div className="stat-grid">
           <div className="stat-card">
@@ -271,45 +371,133 @@ export function Transactions({
               </tr>
             </thead>
             <tbody>
-              {paged.visible.map((t) => (
-                <tr key={t.id}>
-                  <td style={{ whiteSpace: 'nowrap' }}>{dateLabel(t.date)}</td>
-                  <td>
-                    <span className="chip-stack">
-                      <span className="cat-chip">
-                        <span
-                          className="color-dot"
-                          style={{ background: t.categoryColor ?? '#64748b' }}
-                        />
-                        <span>{t.categoryName ?? 'Uncategorized'}</span>
-                      </span>
-                      {t.accountName && (
-                        <span className="cat-chip account-chip" title={`Account: ${t.accountName}`}>
+              {paged.visible.map((r) =>
+                r.kind === 'tx' ? (
+                  <tr key={`tx-${r.t.id}`}>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      {dateLabel(r.t.date)}
+                      {r.t.time && <span className="time-dim"> · {timeLabel(r.t.time)}</span>}
+                    </td>
+                    <td>
+                      <span className="chip-stack">
+                        <span className="cat-chip">
                           <span
                             className="color-dot"
-                            style={{ background: t.accountColor ?? '#64748b' }}
+                            style={{ background: r.t.categoryColor ?? '#64748b' }}
                           />
-                          <span>{t.accountName}</span>
+                          <span>{r.t.categoryName ?? 'Uncategorized'}</span>
+                        </span>
+                        {r.t.accountName && (
+                          <span
+                            className="cat-chip account-chip"
+                            title={`Account: ${r.t.accountName}`}
+                          >
+                            <span
+                              className="color-dot"
+                              style={{ background: r.t.accountColor ?? '#64748b' }}
+                            />
+                            <span>{r.t.accountName}</span>
+                          </span>
+                        )}
+                      </span>
+                    </td>
+                    <td className="note-cell">{r.t.note}</td>
+                    <td className={`num amount-${r.t.type}`}>
+                      {fmtSigned(r.t.amountCents, r.t.type)}
+                    </td>
+                    <td className="actions">
+                      <button
+                        className="btn-icon"
+                        title="Edit"
+                        onClick={() => setModal({ open: true, editing: r.t })}
+                      >
+                        <PencilIcon />
+                      </button>
+                      <button
+                        className="btn-icon danger"
+                        title="Delete"
+                        onClick={() => remove(r.t)}
+                      >
+                        <TrashIcon />
+                      </button>
+                    </td>
+                  </tr>
+                ) : (
+                  <tr key={`tr-${r.tr.id}`}>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      {dateLabel(r.tr.date)}
+                      {r.tr.time && <span className="time-dim"> · {timeLabel(r.tr.time)}</span>}
+                    </td>
+                    <td>
+                      <span className="chip-stack">
+                        <span className="cat-chip">
+                          <TransferIcon size={13} />
+                          <span>{transferBadge(r.tr)}</span>
+                        </span>
+                        <span
+                          className="cat-chip account-chip"
+                          title={`${r.tr.fromName ?? 'Deleted account'} → ${r.tr.toName ?? 'Deleted account'}`}
+                        >
+                          <span
+                            className="color-dot"
+                            style={{ background: r.tr.fromColor ?? '#64748b' }}
+                          />
+                          <span>{r.tr.fromName ?? 'Deleted account'}</span>
+                          <span aria-hidden="true"> → </span>
+                          <span
+                            className="color-dot"
+                            style={{ background: r.tr.toColor ?? '#64748b' }}
+                          />
+                          <span>{r.tr.toName ?? 'Deleted account'}</span>
+                        </span>
+                      </span>
+                    </td>
+                    <td className="note-cell">
+                      {r.tr.note}
+                      {r.tr.feeCents > 0 && (
+                        <span style={{ color: 'var(--text-faint)' }}>
+                          {r.tr.note ? ' · ' : ''}fee {fmtMoney(r.tr.feeCents)}
                         </span>
                       )}
-                    </span>
-                  </td>
-                  <td className="note-cell">{t.note}</td>
-                  <td className={`num amount-${t.type}`}>{fmtSigned(t.amountCents, t.type)}</td>
-                  <td className="actions">
-                    <button
-                      className="btn-icon"
-                      title="Edit"
-                      onClick={() => setModal({ open: true, editing: t })}
+                    </td>
+                    {/* Cash perspective: a Payment drains spendable money (red −),
+                        a Borrow adds to it (green +); a plain move stays neutral. */}
+                    <td
+                      className={`num ${
+                        transferBadge(r.tr) === 'Payment'
+                          ? 'amount-expense'
+                          : transferBadge(r.tr) === 'Borrowed'
+                            ? 'amount-income'
+                            : ''
+                      }`}
                     >
-                      <PencilIcon />
-                    </button>
-                    <button className="btn-icon danger" title="Delete" onClick={() => remove(t)}>
-                      <TrashIcon />
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                      {transferBadge(r.tr) === 'Payment'
+                        ? '−'
+                        : transferBadge(r.tr) === 'Borrowed'
+                          ? '+'
+                          : ''}
+                      {fmtMoney(r.tr.amountCents)}
+                    </td>
+                    <td className="actions">
+                      <button
+                        className="btn-icon"
+                        title="Edit"
+                        onClick={() => setTransferModal({ open: true, editing: r.tr })}
+                        disabled={r.tr.fromAccountId === null || r.tr.toAccountId === null}
+                      >
+                        <PencilIcon />
+                      </button>
+                      <button
+                        className="btn-icon danger"
+                        title="Delete"
+                        onClick={() => removeTransfer(r.tr)}
+                      >
+                        <TrashIcon />
+                      </button>
+                    </td>
+                  </tr>
+                )
+              )}
             </tbody>
           </table>
           <Pager
@@ -333,6 +521,14 @@ export function Transactions({
           accounts={accounts}
           defaultMonth={period.start.slice(0, 7)}
           onClose={() => setModal({ open: false, editing: null })}
+          onSaved={afterMutation}
+        />
+      )}
+      {transferModal.open && (
+        <TransferModal
+          initial={transferModal.editing}
+          accounts={accounts}
+          onClose={() => setTransferModal({ open: false, editing: null })}
           onSaved={afterMutation}
         />
       )}

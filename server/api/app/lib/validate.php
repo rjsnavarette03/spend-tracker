@@ -26,6 +26,18 @@ final class Validate
         return $d;
     }
 
+    /** Optional time-of-day: null/'' -> null, otherwise strict 24h HH:MM. */
+    public static function timeHmOrNull(mixed $t): ?string
+    {
+        if ($t === null || $t === '') {
+            return null;
+        }
+        if (!is_string($t) || !preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $t)) {
+            throw new ApiError('Invalid time', 422);
+        }
+        return $t;
+    }
+
     public static function type(mixed $t): string
     {
         if ($t !== 'income' && $t !== 'expense') {

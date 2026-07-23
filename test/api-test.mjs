@@ -395,6 +395,53 @@ let txId = 0;
   check('income tx with expense category -> 422', typeMismatch.status === 422, `got ${typeMismatch.status}`);
 }
 
+// ---------- transaction time (optional HH:MM) ----------
+// Uses a day (MONTH-20) no other fixture touches, and deletes its rows at the
+// end so the report-math assertions below stay exact.
+{
+  const timed = await a.call('POST', '/transactions', {
+    amountCents: 1000, type: 'expense', categoryId: null, date: `${MONTH}-20`, time: '14:35', note: 'timed A',
+  });
+  check('create tx with time -> echoed back', timed.status === 201 && timed.data.time === '14:35', JSON.stringify(timed.data));
+
+  const earlier = await a.call('POST', '/transactions', {
+    amountCents: 1000, type: 'expense', categoryId: null, date: `${MONTH}-20`, time: '09:05', note: 'timed B',
+  });
+  const untimed = await a.call('POST', '/transactions', {
+    amountCents: 1000, type: 'expense', categoryId: null, date: `${MONTH}-20`, note: 'untimed C',
+  });
+  check('tx without time -> time null', untimed.status === 201 && untimed.data.time === null, JSON.stringify(untimed.data));
+
+  const badTime = await a.call('POST', '/transactions', {
+    amountCents: 1000, type: 'expense', categoryId: null, date: `${MONTH}-20`, time: '25:61', note: 'bad time',
+  });
+  check('invalid time -> 422', badTime.status === 422, `got ${badTime.status}`);
+
+  // Same-day ordering: latest time first, untimed (NULL) rows last.
+  const day = await a.call('GET', `/transactions?from=${MONTH}-20&to=${MONTH}-20`);
+  const notes = day.data.map((t) => t.note);
+  check(
+    'same-day order: latest time first, untimed last',
+    JSON.stringify(notes) === JSON.stringify(['timed A', 'timed B', 'untimed C']),
+    JSON.stringify(notes)
+  );
+
+  const setTime = await a.call('PUT', `/transactions/${timed.data.id}`, {
+    amountCents: 1000, type: 'expense', categoryId: null, date: `${MONTH}-20`, time: '23:59', note: 'timed A',
+  });
+  check('update can change the time', setTime.status === 200);
+  const clearTime = await a.call('PUT', `/transactions/${timed.data.id}`, {
+    amountCents: 1000, type: 'expense', categoryId: null, date: `${MONTH}-20`, time: null, note: 'timed A',
+  });
+  check('update can clear the time', clearTime.status === 200);
+
+  for (const id of [timed.data.id, earlier.data.id, untimed.data.id]) {
+    await a.call('DELETE', `/transactions/${id}`);
+  }
+  const gone = await a.call('GET', `/transactions?from=${MONTH}-20&to=${MONTH}-20`);
+  check('time-test rows cleaned up', gone.data.length === 0, `got ${gone.data?.length}`);
+}
+
 // ---------- reports ----------
 {
   const s = await a.call('GET', `/reports/summary?month=${MONTH}`);
@@ -657,6 +704,21 @@ let bankId = 0;
     fromAccountId: bankId, toAccountId: walletId, amountCents: 100, feeCents: -5, date: `${MONTH}-13`, note: '',
   });
   check('negative fee -> 422', negFee.status === 422, `got ${negFee.status}`);
+
+  // optional time (HH:MM), mirroring transactions.time. The timed transfer is
+  // deleted again so the exact balance assertions below stay valid.
+  const timedTf = await a.call('POST', '/transfers', {
+    fromAccountId: bankId, toAccountId: walletId, amountCents: 700, feeCents: 0,
+    date: `${MONTH}-14`, time: '18:45', note: 'timed transfer',
+  });
+  check('transfer with time -> echoed back', timedTf.status === 201 && timedTf.data.time === '18:45', JSON.stringify(timedTf.data));
+  check('transfer without time -> time null', tf2.data.time === null, JSON.stringify(tf2.data));
+  const badTfTime = await a.call('POST', '/transfers', {
+    fromAccountId: bankId, toAccountId: walletId, amountCents: 700, feeCents: 0,
+    date: `${MONTH}-14`, time: '24:00', note: 'bad time',
+  });
+  check('transfer with invalid time -> 422', badTfTime.status === 422, `got ${badTfTime.status}`);
+  await a.call('DELETE', `/transfers/${timedTf.data.id}`);
 
   // update transfer: change amount, balances follow
   const upd = await a.call('PUT', `/transfers/${tfId}`, {

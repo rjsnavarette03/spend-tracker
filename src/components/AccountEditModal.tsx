@@ -5,6 +5,7 @@ import {
   centsToInput,
   cleanError,
   fmtMoney,
+  nowTimeHm,
   ordinal,
   parseAmountToCents,
   parseSignedAmountToCents,
@@ -153,6 +154,7 @@ export function AccountEditModal({
             amountCents: loanAmount,
             feeCents,
             date: todayStr(),
+            time: nowTimeHm(),
             note: 'Loan received',
           });
         } catch (err) {

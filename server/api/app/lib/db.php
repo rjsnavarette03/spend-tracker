@@ -219,6 +219,23 @@ final class DB
         // shipped a two-value enum/CHECK, which CREATE IF NOT EXISTS can't
         // widen — detect and widen idempotently.
         self::migrateSubscriptionCycleYearly($driver);
+
+        // Step 9: transactions.time / transfers.time (optional HH:MM,
+        // client-local — same string convention as `date`). NULL for rows
+        // that predate the feature and for subscription auto-charges (no
+        // known time-of-day).
+        if (!self::columnExists('transactions', 'time')) {
+            $col = $driver === 'sqlite'
+                ? 'ALTER TABLE transactions ADD COLUMN time TEXT NULL'
+                : 'ALTER TABLE transactions ADD COLUMN time CHAR(5) NULL';
+            self::tryDdl($col);
+        }
+        if (!self::columnExists('transfers', 'time')) {
+            $col = $driver === 'sqlite'
+                ? 'ALTER TABLE transfers ADD COLUMN time TEXT NULL'
+                : 'ALTER TABLE transfers ADD COLUMN time CHAR(5) NULL';
+            self::tryDdl($col);
+        }
     }
 
     /**

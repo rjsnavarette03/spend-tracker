@@ -150,15 +150,17 @@ final class Repo
         }
 
         $rows = DB::all(
+            // time DESC puts NULLs (legacy rows / no time given) last within a
+            // day on BOTH dialects (NULL sorts smallest), then id breaks ties.
             'SELECT t.id, t.amount_cents AS amountCents, t.type, t.category_id AS categoryId,
-                    t.account_id AS accountId, t.date, t.note,
+                    t.account_id AS accountId, t.date, t.time, t.note,
                     c.name AS categoryName, c.color AS categoryColor,
                     a.name AS accountName, a.color AS accountColor
              FROM transactions t
              LEFT JOIN categories c ON c.id = t.category_id
              LEFT JOIN accounts a ON a.id = t.account_id
              WHERE ' . implode(' AND ', $where) . '
-             ORDER BY t.date DESC, t.id DESC
+             ORDER BY t.date DESC, t.time DESC, t.id DESC
              LIMIT 2000',
             $params
         );
@@ -177,6 +179,7 @@ final class Repo
             'type' => (string)$r['type'],
             'categoryId' => $r['categoryId'] === null ? null : (int)$r['categoryId'],
             'date' => (string)$r['date'],
+            'time' => $r['time'] === null ? null : (string)$r['time'],
             'note' => (string)$r['note'],
             'categoryName' => $r['categoryName'] === null ? null : (string)$r['categoryName'],
             'categoryColor' => $r['categoryColor'] === null ? null : (string)$r['categoryColor'],
@@ -188,7 +191,7 @@ final class Repo
 
     /**
      * @param array<string, mixed> $data
-     * @return array{0: int, 1: string, 2: ?int, 3: ?int, 4: string, 5: string} amount, type, categoryId, accountId, date, note
+     * @return array{0: int, 1: string, 2: ?int, 3: ?int, 4: string, 5: ?string, 6: string} amount, type, categoryId, accountId, date, time, note
      */
     private static function cleanTxInput(int $uid, array $data): array
     {
@@ -197,6 +200,7 @@ final class Repo
         $categoryId = Validate::categoryIdOrNull($data['categoryId'] ?? null);
         $accountId = Validate::accountIdOrNull($data['accountId'] ?? null);
         $date = Validate::date($data['date'] ?? null);
+        $time = Validate::timeHmOrNull($data['time'] ?? null);
         $note = Validate::note($data['note'] ?? '');
         if ($categoryId !== null) {
             // Category must belong to the user AND match the tx type, so an
@@ -207,7 +211,7 @@ final class Repo
         if ($accountId !== null) {
             self::assertAccountOwned($uid, $accountId);
         }
-        return [$amount, $type, $categoryId, $accountId, $date, $note];
+        return [$amount, $type, $categoryId, $accountId, $date, $time, $note];
     }
 
     /**
@@ -216,15 +220,15 @@ final class Repo
      */
     public static function createTransaction(int $uid, array $data): array
     {
-        [$amount, $type, $categoryId, $accountId, $date, $note] = self::cleanTxInput($uid, $data);
+        [$amount, $type, $categoryId, $accountId, $date, $time, $note] = self::cleanTxInput($uid, $data);
         $id = DB::insert(
-            'INSERT INTO transactions (user_id, amount_cents, type, category_id, account_id, date, note)
-             VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [$uid, $amount, $type, $categoryId, $accountId, $date, $note]
+            'INSERT INTO transactions (user_id, amount_cents, type, category_id, account_id, date, time, note)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [$uid, $amount, $type, $categoryId, $accountId, $date, $time, $note]
         );
         $row = DB::one(
             'SELECT t.id, t.amount_cents AS amountCents, t.type, t.category_id AS categoryId,
-                    t.account_id AS accountId, t.date, t.note,
+                    t.account_id AS accountId, t.date, t.time, t.note,
                     c.name AS categoryName, c.color AS categoryColor,
                     a.name AS accountName, a.color AS accountColor
              FROM transactions t
@@ -240,14 +244,14 @@ final class Repo
     /** @param array<string, mixed> $data */
     public static function updateTransaction(int $uid, int $id, array $data): void
     {
-        [$amount, $type, $categoryId, $accountId, $date, $note] = self::cleanTxInput($uid, $data);
+        [$amount, $type, $categoryId, $accountId, $date, $time, $note] = self::cleanTxInput($uid, $data);
         if (DB::one('SELECT id FROM transactions WHERE id = ? AND user_id = ?', [$id, $uid]) === null) {
             throw new ApiError('Transaction not found', 404);
         }
         DB::exec(
-            'UPDATE transactions SET amount_cents = ?, type = ?, category_id = ?, account_id = ?, date = ?, note = ?
+            'UPDATE transactions SET amount_cents = ?, type = ?, category_id = ?, account_id = ?, date = ?, time = ?, note = ?
              WHERE id = ? AND user_id = ?',
-            [$amount, $type, $categoryId, $accountId, $date, $note, $id, $uid]
+            [$amount, $type, $categoryId, $accountId, $date, $time, $note, $id, $uid]
         );
     }
 
@@ -423,8 +427,9 @@ final class Repo
         $amount = Validate::amountCents($data['amountCents'] ?? null);
         $fee = Validate::feeCents($data['feeCents'] ?? null);
         $date = Validate::date($data['date'] ?? null);
+        $time = Validate::timeHmOrNull($data['time'] ?? null);
         $note = Validate::note($data['note'] ?? '');
-        return [$from, $to, $amount, $fee, $date, $note];
+        return [$from, $to, $amount, $fee, $date, $time, $note];
     }
 
     /** @return array<int, array<string, mixed>> */
@@ -437,15 +442,16 @@ final class Repo
             $params[] = Validate::month($month);
         }
         $rows = DB::all(
+            // Same NULL-last-within-a-day ordering as listTransactions.
             'SELECT tr.id, tr.from_account_id AS fromAccountId, tr.to_account_id AS toAccountId,
-                    tr.amount_cents AS amountCents, tr.fee_cents AS feeCents, tr.date, tr.note,
+                    tr.amount_cents AS amountCents, tr.fee_cents AS feeCents, tr.date, tr.time, tr.note,
                     fa.name AS fromName, fa.color AS fromColor,
                     ta.name AS toName, ta.color AS toColor
              FROM transfers tr
              LEFT JOIN accounts fa ON fa.id = tr.from_account_id
              LEFT JOIN accounts ta ON ta.id = tr.to_account_id
              WHERE ' . implode(' AND ', $where) . '
-             ORDER BY tr.date DESC, tr.id DESC
+             ORDER BY tr.date DESC, tr.time DESC, tr.id DESC
              LIMIT 500',
             $params
         );
@@ -465,6 +471,7 @@ final class Repo
             'amountCents' => (int)$r['amountCents'],
             'feeCents' => (int)$r['feeCents'],
             'date' => (string)$r['date'],
+            'time' => $r['time'] === null ? null : (string)$r['time'],
             'note' => (string)$r['note'],
             'fromName' => $r['fromName'] === null ? null : (string)$r['fromName'],
             'fromColor' => $r['fromColor'] === null ? null : (string)$r['fromColor'],
@@ -479,15 +486,15 @@ final class Repo
      */
     public static function createTransfer(int $uid, array $data): array
     {
-        [$from, $to, $amount, $fee, $date, $note] = self::cleanTransferInput($uid, $data);
+        [$from, $to, $amount, $fee, $date, $time, $note] = self::cleanTransferInput($uid, $data);
         $id = DB::insert(
-            'INSERT INTO transfers (user_id, from_account_id, to_account_id, amount_cents, fee_cents, date, note)
-             VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [$uid, $from, $to, $amount, $fee, $date, $note]
+            'INSERT INTO transfers (user_id, from_account_id, to_account_id, amount_cents, fee_cents, date, time, note)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [$uid, $from, $to, $amount, $fee, $date, $time, $note]
         );
         $row = DB::one(
             'SELECT tr.id, tr.from_account_id AS fromAccountId, tr.to_account_id AS toAccountId,
-                    tr.amount_cents AS amountCents, tr.fee_cents AS feeCents, tr.date, tr.note,
+                    tr.amount_cents AS amountCents, tr.fee_cents AS feeCents, tr.date, tr.time, tr.note,
                     fa.name AS fromName, fa.color AS fromColor,
                     ta.name AS toName, ta.color AS toColor
              FROM transfers tr
@@ -503,14 +510,14 @@ final class Repo
     /** @param array<string, mixed> $data */
     public static function updateTransfer(int $uid, int $id, array $data): void
     {
-        [$from, $to, $amount, $fee, $date, $note] = self::cleanTransferInput($uid, $data);
+        [$from, $to, $amount, $fee, $date, $time, $note] = self::cleanTransferInput($uid, $data);
         if (DB::one('SELECT id FROM transfers WHERE id = ? AND user_id = ?', [$id, $uid]) === null) {
             throw new ApiError('Transfer not found', 404);
         }
         DB::exec(
-            'UPDATE transfers SET from_account_id = ?, to_account_id = ?, amount_cents = ?, fee_cents = ?, date = ?, note = ?
+            'UPDATE transfers SET from_account_id = ?, to_account_id = ?, amount_cents = ?, fee_cents = ?, date = ?, time = ?, note = ?
              WHERE id = ? AND user_id = ?',
-            [$from, $to, $amount, $fee, $date, $note, $id, $uid]
+            [$from, $to, $amount, $fee, $date, $time, $note, $id, $uid]
         );
     }
 
