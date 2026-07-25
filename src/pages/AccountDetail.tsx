@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { Transaction, Transfer } from '../../shared/types';
 import { api } from '../api';
@@ -101,6 +101,46 @@ const DETAIL_TRANSFER_SORTS: SortOption<Transfer>[] = [
   },
 ];
 
+// Credit cards get ONE merged ledger (purchases + payments) instead of a
+// separate transfers table — every transfer touching a card IS a payment.
+type Row = { kind: 'tx'; t: Transaction } | { kind: 'transfer'; tr: Transfer };
+const rowDate = (r: Row) => (r.kind === 'tx' ? r.t.date : r.tr.date);
+const rowTime = (r: Row) => (r.kind === 'tx' ? r.t.time ?? '' : r.tr.time ?? '');
+const rowId = (r: Row) => (r.kind === 'tx' ? r.t.id : r.tr.id);
+const rowAmount = (r: Row) => (r.kind === 'tx' ? r.t.amountCents : r.tr.amountCents);
+const ROW_SEARCH = (r: Row) =>
+  r.kind === 'tx'
+    ? `${r.t.note} ${r.t.categoryName ?? ''}`
+    : `payment ${r.tr.note} ${r.tr.fromName ?? ''} ${r.tr.toName ?? ''}`;
+const ROW_SORTS: SortOption<Row>[] = [
+  {
+    value: 'date-desc',
+    label: 'Date (newest)',
+    compare: (a, b) =>
+      rowDate(b).localeCompare(rowDate(a)) ||
+      rowTime(b).localeCompare(rowTime(a)) ||
+      rowId(b) - rowId(a),
+  },
+  {
+    value: 'date-asc',
+    label: 'Date (oldest)',
+    compare: (a, b) =>
+      rowDate(a).localeCompare(rowDate(b)) ||
+      rowTime(a).localeCompare(rowTime(b)) ||
+      rowId(a) - rowId(b),
+  },
+  {
+    value: 'amount-desc',
+    label: 'Amount (high–low)',
+    compare: (a, b) => rowAmount(b) - rowAmount(a),
+  },
+  {
+    value: 'amount-asc',
+    label: 'Amount (low–high)',
+    compare: (a, b) => rowAmount(a) - rowAmount(b),
+  },
+];
+
 export function AccountDetail() {
   const { period, categories, accounts, onDataChanged } = useAppContext();
   const params = useParams();
@@ -127,6 +167,18 @@ export function AccountDetail() {
     initialSort: 'date-desc',
   });
   const pagedTransfers = usePagedTable(transfers, DETAIL_TRANSFER_SEARCH, DETAIL_TRANSFER_SORTS, {
+    initialSort: 'date-desc',
+  });
+  // Merged ledger for credit accounts (built unconditionally — hooks can't
+  // live behind the account-type branch).
+  const rows = useMemo<Row[]>(
+    () => [
+      ...txs.map((t): Row => ({ kind: 'tx', t })),
+      ...transfers.map((tr): Row => ({ kind: 'transfer', tr })),
+    ],
+    [txs, transfers]
+  );
+  const pagedRows = usePagedTable(rows, ROW_SEARCH, ROW_SORTS, {
     initialSort: 'date-desc',
   });
 
@@ -172,10 +224,12 @@ export function AccountDetail() {
     }
   };
 
-  const removeTransfer = async (tr: Transfer) => {
+  // On credit accounts every transfer row is a payment — the confirm dialog
+  // should say so instead of "transfer".
+  const removeTransfer = async (tr: Transfer, noun: 'transfer' | 'payment' = 'transfer') => {
     const ok = await confirm({
-      title: 'Delete transfer',
-      message: `Delete this transfer of ${fmtMoney(tr.amountCents)}?`,
+      title: noun === 'payment' ? 'Delete payment' : 'Delete transfer',
+      message: `Delete this ${noun} of ${fmtMoney(tr.amountCents)}?`,
       confirmLabel: 'Delete',
       danger: true,
     });
@@ -323,209 +377,368 @@ export function AccountDetail() {
         )}
       </div>
 
-      <div className="panel mt-panel">
-        <div className="panel-head">
-          <div className="panel-title">Transactions</div>
-          {txs.length > 0 && (
-            <div className="table-controls">
-              <select
-                aria-label="Sort transactions"
-                value={pagedTxs.sort}
-                onChange={(e) => pagedTxs.setSort(e.target.value)}
-              >
-                {DETAIL_TX_SORTS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-              <input
-                type="search"
-                placeholder="Search transactions…"
-                value={pagedTxs.query}
-                onChange={(e) => pagedTxs.setQuery(e.target.value)}
-              />
-            </div>
-          )}
-        </div>
-        {!loaded ? (
-          <div className="empty-state">Loading…</div>
-        ) : txs.length === 0 ? (
-          <div className="empty-state">No transactions linked to this account yet.</div>
-        ) : pagedTxs.matchedCount === 0 ? (
-          <div className="empty-state">No transactions match your search.</div>
-        ) : (
-          /* tx-cards: ≤860px CSS restacks each row into a native-app list card */
-          <>
-          <table className="table tx-cards">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Category</th>
-                <th>Note</th>
-                <th style={{ textAlign: 'right' }}>Amount</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {pagedTxs.visible.map((t) => (
-                <tr key={t.id}>
-                  <td style={{ whiteSpace: 'nowrap' }}>
-                    {dateLabel(t.date)}
-                    {t.time && <span className="time-dim"> · {timeLabel(t.time)}</span>}
-                  </td>
-                  <td>
-                    <span className="cat-chip">
-                      <span
-                        className="color-dot"
-                        style={{ background: t.categoryColor ?? '#64748b' }}
-                      />
-                      <span>{t.categoryName ?? 'Uncategorized'}</span>
-                    </span>
-                  </td>
-                  <td className="note-cell">{t.note}</td>
-                  <td className={`num ${t.type === 'income' ? 'amount-income' : 'amount-expense'}`}>
-                    {t.type === 'income' ? '+' : '−'}
-                    {fmtMoney(t.amountCents)}
-                  </td>
-                  <td className="actions">
-                    <button
-                      className="btn-icon"
-                      title="Edit"
-                      onClick={() => setTxModal({ open: true, editing: t })}
-                    >
-                      <PencilIcon />
-                    </button>
-                    <button
-                      className="btn-icon danger"
-                      title="Delete"
-                      onClick={() => removeTx(t)}
-                    >
-                      <TrashIcon />
-                    </button>
-                  </td>
+      {account.type === 'credit' ? (
+        /* Credit cards: purchases and payments are one story, and plain
+           transfers don't apply — one merged ledger replaces the two tables. */
+        <div className="panel mt-panel">
+          <div className="panel-head">
+            <div className="panel-title">Transactions &amp; payments</div>
+            {rows.length > 0 && (
+              <div className="table-controls">
+                <select
+                  aria-label="Sort entries"
+                  value={pagedRows.sort}
+                  onChange={(e) => pagedRows.setSort(e.target.value)}
+                >
+                  {ROW_SORTS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="search"
+                  placeholder="Search transactions…"
+                  value={pagedRows.query}
+                  onChange={(e) => pagedRows.setQuery(e.target.value)}
+                />
+              </div>
+            )}
+          </div>
+          {!loaded ? (
+            <div className="empty-state">Loading…</div>
+          ) : rows.length === 0 ? (
+            <div className="empty-state">No transactions or payments on this account yet.</div>
+          ) : pagedRows.matchedCount === 0 ? (
+            <div className="empty-state">Nothing matches your search.</div>
+          ) : (
+            /* tx-cards: ≤860px CSS restacks each row into a native-app list card */
+            <>
+            <table className="table tx-cards">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Category</th>
+                  <th>Note</th>
+                  <th style={{ textAlign: 'right' }}>Amount</th>
+                  <th />
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          <Pager
-            page={pagedTxs.page}
-            pageCount={pagedTxs.pageCount}
-            pageSize={pagedTxs.pageSize}
-            setPage={pagedTxs.setPage}
-            setPageSize={pagedTxs.setPageSize}
-            rangeStart={pagedTxs.rangeStart}
-            rangeEnd={pagedTxs.rangeEnd}
-            total={pagedTxs.matchedCount}
-            unit="transactions"
-          />
-          </>
-        )}
-      </div>
-
-      <div className="panel mt-panel">
-        <div className="panel-head">
-          <div className="panel-title">Transfers &amp; payments</div>
-          {transfers.length > 0 && (
-            <div className="table-controls">
-              <select
-                aria-label="Sort transfers"
-                value={pagedTransfers.sort}
-                onChange={(e) => pagedTransfers.setSort(e.target.value)}
-              >
-                {DETAIL_TRANSFER_SORTS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-              <input
-                type="search"
-                placeholder="Search transfers…"
-                value={pagedTransfers.query}
-                onChange={(e) => pagedTransfers.setQuery(e.target.value)}
-              />
-            </div>
+              </thead>
+              <tbody>
+                {pagedRows.visible.map((r) => {
+                  if (r.kind === 'tx') {
+                    const t = r.t;
+                    return (
+                      <tr key={`tx-${t.id}`}>
+                        <td style={{ whiteSpace: 'nowrap' }}>
+                          {dateLabel(t.date)}
+                          {t.time && <span className="time-dim"> · {timeLabel(t.time)}</span>}
+                        </td>
+                        <td>
+                          <span className="cat-chip">
+                            <span
+                              className="color-dot"
+                              style={{ background: t.categoryColor ?? '#64748b' }}
+                            />
+                            <span>{t.categoryName ?? 'Uncategorized'}</span>
+                          </span>
+                        </td>
+                        <td className="note-cell">{t.note}</td>
+                        <td className={`num ${t.type === 'income' ? 'amount-income' : 'amount-expense'}`}>
+                          {t.type === 'income' ? '+' : '−'}
+                          {fmtMoney(t.amountCents)}
+                        </td>
+                        <td className="actions">
+                          <button
+                            className="btn-icon"
+                            title="Edit"
+                            onClick={() => setTxModal({ open: true, editing: t })}
+                          >
+                            <PencilIcon />
+                          </button>
+                          <button
+                            className="btn-icon danger"
+                            title="Delete"
+                            onClick={() => removeTx(t)}
+                          >
+                            <TrashIcon />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  }
+                  const tr = r.tr;
+                  const incoming = tr.toAccountId === id;
+                  // Card perspective: a payment received shrinks the debt (+);
+                  // paying another debt FROM this card grows it (amount + fee).
+                  const delta = incoming ? tr.amountCents : -(tr.amountCents + tr.feeCents);
+                  const other = incoming
+                    ? tr.fromName ?? 'Deleted account'
+                    : tr.toName ?? 'Deleted account';
+                  return (
+                    <tr key={`tr-${tr.id}`}>
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        {dateLabel(tr.date)}
+                        {tr.time && <span className="time-dim"> · {timeLabel(tr.time)}</span>}
+                      </td>
+                      <td>
+                        <span className="cat-chip">
+                          <BanknoteIcon size={13} />
+                          <span>Payment</span>
+                        </span>
+                      </td>
+                      <td className="note-cell">
+                        {incoming ? 'From ' : 'To '}
+                        {other}
+                        {tr.note ? ` · ${tr.note}` : ''}
+                      </td>
+                      <td className={`num ${delta < 0 ? 'amount-expense' : 'amount-income'}`}>
+                        {delta < 0 ? '−' : '+'}
+                        {fmtMoney(Math.abs(delta))}
+                      </td>
+                      <td className="actions">
+                        <button
+                          className="btn-icon"
+                          title="Edit"
+                          onClick={() => setTransferModal({ open: true, editing: tr })}
+                          disabled={tr.fromAccountId === null || tr.toAccountId === null}
+                        >
+                          <PencilIcon />
+                        </button>
+                        <button
+                          className="btn-icon danger"
+                          title="Delete"
+                          onClick={() => removeTransfer(tr, 'payment')}
+                        >
+                          <TrashIcon />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            <Pager
+              page={pagedRows.page}
+              pageCount={pagedRows.pageCount}
+              pageSize={pagedRows.pageSize}
+              setPage={pagedRows.setPage}
+              setPageSize={pagedRows.setPageSize}
+              rangeStart={pagedRows.rangeStart}
+              rangeEnd={pagedRows.rangeEnd}
+              total={pagedRows.matchedCount}
+              unit="entries"
+            />
+            </>
           )}
         </div>
-        {!loaded ? (
-          <div className="empty-state">Loading…</div>
-        ) : transfers.length === 0 ? (
-          <div className="empty-state">No transfers or payments involving this account yet.</div>
-        ) : pagedTransfers.matchedCount === 0 ? (
-          <div className="empty-state">No transfers match your search.</div>
-        ) : (
-          /* detail-transfers: ≤860px CSS restacks rows into list cards */
-          <>
-          <table className="table detail-transfers">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Details</th>
-                <th style={{ textAlign: 'right' }}>Amount</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {pagedTransfers.visible.map((tr) => {
-                const incoming = tr.toAccountId === id;
-                // What actually moves for THIS account: incoming = +amount;
-                // outgoing = −(amount + fee), since the fee also leaves the source.
-                const delta = incoming ? tr.amountCents : -(tr.amountCents + tr.feeCents);
-                const other = incoming
-                  ? tr.fromName ?? 'Deleted account'
-                  : tr.toName ?? 'Deleted account';
-                return (
-                  <tr key={tr.id}>
-                    <td style={{ whiteSpace: 'nowrap' }}>
-                      {dateLabel(tr.date)}
-                      {tr.time && <span className="time-dim"> · {timeLabel(tr.time)}</span>}
-                    </td>
-                    <td>
-                      {incoming ? 'From ' : 'To '}
-                      {other}
-                      {tr.note ? ` · ${tr.note}` : ''}
-                    </td>
-                    <td className={`num ${delta < 0 ? 'amount-expense' : 'amount-income'}`}>
-                      {delta < 0 ? '−' : '+'}
-                      {fmtMoney(Math.abs(delta))}
-                    </td>
-                    <td className="actions">
-                      <button
-                        className="btn-icon"
-                        title="Edit"
-                        onClick={() => setTransferModal({ open: true, editing: tr })}
-                        disabled={tr.fromAccountId === null || tr.toAccountId === null}
-                      >
-                        <PencilIcon />
-                      </button>
-                      <button
-                        className="btn-icon danger"
-                        title="Delete"
-                        onClick={() => removeTransfer(tr)}
-                      >
-                        <TrashIcon />
-                      </button>
-                    </td>
+      ) : (
+        <>
+          <div className="panel mt-panel">
+            <div className="panel-head">
+              <div className="panel-title">Transactions</div>
+              {txs.length > 0 && (
+                <div className="table-controls">
+                  <select
+                    aria-label="Sort transactions"
+                    value={pagedTxs.sort}
+                    onChange={(e) => pagedTxs.setSort(e.target.value)}
+                  >
+                    {DETAIL_TX_SORTS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="search"
+                    placeholder="Search transactions…"
+                    value={pagedTxs.query}
+                    onChange={(e) => pagedTxs.setQuery(e.target.value)}
+                  />
+                </div>
+              )}
+            </div>
+            {!loaded ? (
+              <div className="empty-state">Loading…</div>
+            ) : txs.length === 0 ? (
+              <div className="empty-state">No transactions linked to this account yet.</div>
+            ) : pagedTxs.matchedCount === 0 ? (
+              <div className="empty-state">No transactions match your search.</div>
+            ) : (
+              /* tx-cards: ≤860px CSS restacks each row into a native-app list card */
+              <>
+              <table className="table tx-cards">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Category</th>
+                    <th>Note</th>
+                    <th style={{ textAlign: 'right' }}>Amount</th>
+                    <th />
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          <Pager
-            page={pagedTransfers.page}
-            pageCount={pagedTransfers.pageCount}
-            pageSize={pagedTransfers.pageSize}
-            setPage={pagedTransfers.setPage}
-            setPageSize={pagedTransfers.setPageSize}
-            rangeStart={pagedTransfers.rangeStart}
-            rangeEnd={pagedTransfers.rangeEnd}
-            total={pagedTransfers.matchedCount}
-            unit="transfers"
-          />
-          </>
-        )}
-      </div>
+                </thead>
+                <tbody>
+                  {pagedTxs.visible.map((t) => (
+                    <tr key={t.id}>
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        {dateLabel(t.date)}
+                        {t.time && <span className="time-dim"> · {timeLabel(t.time)}</span>}
+                      </td>
+                      <td>
+                        <span className="cat-chip">
+                          <span
+                            className="color-dot"
+                            style={{ background: t.categoryColor ?? '#64748b' }}
+                          />
+                          <span>{t.categoryName ?? 'Uncategorized'}</span>
+                        </span>
+                      </td>
+                      <td className="note-cell">{t.note}</td>
+                      <td className={`num ${t.type === 'income' ? 'amount-income' : 'amount-expense'}`}>
+                        {t.type === 'income' ? '+' : '−'}
+                        {fmtMoney(t.amountCents)}
+                      </td>
+                      <td className="actions">
+                        <button
+                          className="btn-icon"
+                          title="Edit"
+                          onClick={() => setTxModal({ open: true, editing: t })}
+                        >
+                          <PencilIcon />
+                        </button>
+                        <button
+                          className="btn-icon danger"
+                          title="Delete"
+                          onClick={() => removeTx(t)}
+                        >
+                          <TrashIcon />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <Pager
+                page={pagedTxs.page}
+                pageCount={pagedTxs.pageCount}
+                pageSize={pagedTxs.pageSize}
+                setPage={pagedTxs.setPage}
+                setPageSize={pagedTxs.setPageSize}
+                rangeStart={pagedTxs.rangeStart}
+                rangeEnd={pagedTxs.rangeEnd}
+                total={pagedTxs.matchedCount}
+                unit="transactions"
+              />
+              </>
+            )}
+          </div>
+
+          <div className="panel mt-panel">
+            <div className="panel-head">
+              <div className="panel-title">Transfers &amp; payments</div>
+              {transfers.length > 0 && (
+                <div className="table-controls">
+                  <select
+                    aria-label="Sort transfers"
+                    value={pagedTransfers.sort}
+                    onChange={(e) => pagedTransfers.setSort(e.target.value)}
+                  >
+                    {DETAIL_TRANSFER_SORTS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="search"
+                    placeholder="Search transfers…"
+                    value={pagedTransfers.query}
+                    onChange={(e) => pagedTransfers.setQuery(e.target.value)}
+                  />
+                </div>
+              )}
+            </div>
+            {!loaded ? (
+              <div className="empty-state">Loading…</div>
+            ) : transfers.length === 0 ? (
+              <div className="empty-state">No transfers or payments involving this account yet.</div>
+            ) : pagedTransfers.matchedCount === 0 ? (
+              <div className="empty-state">No transfers match your search.</div>
+            ) : (
+              /* detail-transfers: ≤860px CSS restacks rows into list cards */
+              <>
+              <table className="table detail-transfers">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Details</th>
+                    <th style={{ textAlign: 'right' }}>Amount</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {pagedTransfers.visible.map((tr) => {
+                    const incoming = tr.toAccountId === id;
+                    // What actually moves for THIS account: incoming = +amount;
+                    // outgoing = −(amount + fee), since the fee also leaves the source.
+                    const delta = incoming ? tr.amountCents : -(tr.amountCents + tr.feeCents);
+                    const other = incoming
+                      ? tr.fromName ?? 'Deleted account'
+                      : tr.toName ?? 'Deleted account';
+                    return (
+                      <tr key={tr.id}>
+                        <td style={{ whiteSpace: 'nowrap' }}>
+                          {dateLabel(tr.date)}
+                          {tr.time && <span className="time-dim"> · {timeLabel(tr.time)}</span>}
+                        </td>
+                        <td>
+                          {incoming ? 'From ' : 'To '}
+                          {other}
+                          {tr.note ? ` · ${tr.note}` : ''}
+                        </td>
+                        <td className={`num ${delta < 0 ? 'amount-expense' : 'amount-income'}`}>
+                          {delta < 0 ? '−' : '+'}
+                          {fmtMoney(Math.abs(delta))}
+                        </td>
+                        <td className="actions">
+                          <button
+                            className="btn-icon"
+                            title="Edit"
+                            onClick={() => setTransferModal({ open: true, editing: tr })}
+                            disabled={tr.fromAccountId === null || tr.toAccountId === null}
+                          >
+                            <PencilIcon />
+                          </button>
+                          <button
+                            className="btn-icon danger"
+                            title="Delete"
+                            onClick={() => removeTransfer(tr)}
+                          >
+                            <TrashIcon />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <Pager
+                page={pagedTransfers.page}
+                pageCount={pagedTransfers.pageCount}
+                pageSize={pagedTransfers.pageSize}
+                setPage={pagedTransfers.setPage}
+                setPageSize={pagedTransfers.setPageSize}
+                rangeStart={pagedTransfers.rangeStart}
+                rangeEnd={pagedTransfers.rangeEnd}
+                total={pagedTransfers.matchedCount}
+                unit="transfers"
+              />
+              </>
+            )}
+          </div>
+        </>
+      )}
 
       {payOpen && (
         <PayModal
