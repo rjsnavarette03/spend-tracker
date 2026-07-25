@@ -209,7 +209,11 @@ final class Repo
             self::assertCategoryOwned($uid, $categoryId, $type);
         }
         if ($accountId !== null) {
-            self::assertAccountOwned($uid, $accountId);
+            // Loans are managed purely via transfers (Pay / Borrow again);
+            // the UI never offers them here, so enforce it server-side too.
+            if (self::assertAccountOwned($uid, $accountId) === 'loan') {
+                throw new ApiError('Transactions cannot be linked to a loan account', 422);
+            }
         }
         return [$amount, $type, $categoryId, $accountId, $date, $time, $note];
     }
@@ -402,11 +406,14 @@ final class Repo
         }
     }
 
-    private static function assertAccountOwned(int $uid, int $accountId): void
+    /** Verifies ownership; returns the account type for callers that restrict by type. */
+    private static function assertAccountOwned(int $uid, int $accountId): string
     {
-        if (DB::one('SELECT id FROM accounts WHERE id = ? AND user_id = ?', [$accountId, $uid]) === null) {
+        $a = DB::one('SELECT type FROM accounts WHERE id = ? AND user_id = ?', [$accountId, $uid]);
+        if ($a === null) {
             throw new ApiError('Invalid account', 422);
         }
+        return (string)$a['type'];
     }
 
     // ---------- transfers ----------

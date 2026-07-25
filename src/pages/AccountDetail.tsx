@@ -534,6 +534,9 @@ export function AccountDetail() {
         </div>
       ) : (
         <>
+          {/* Loans have no transactions (the form never offers them and the
+              API rejects them) — everything lives in Transfers & payments. */}
+          {account.type === 'debit' && (
           <div className="panel mt-panel">
             <div className="panel-head">
               <div className="panel-title">Transactions</div>
@@ -633,6 +636,7 @@ export function AccountDetail() {
               </>
             )}
           </div>
+          )}
 
           <div className="panel mt-panel">
             <div className="panel-head">

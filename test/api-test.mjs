@@ -481,7 +481,10 @@ let txId = 0;
   // Assumes the test runner and server share the calendar day. A fresh
   // category + a single today-dated expense makes "spent this period" exact:
   // today falls inside the current week AND month AND year.
-  const TODAY = new Date().toISOString().slice(0, 10);
+  // LOCAL date, not toISOString() (UTC) — before 8am UTC+8 the UTC date is
+  // yesterday, which can fall in the previous week and zero the weekly spent.
+  const now = new Date();
+  const TODAY = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const bc = await a.call('POST', '/categories', { name: 'BudgetProbe', type: 'expense', color: '#123456' });
   const bcId = bc.data.id;
   const btx = await a.call('POST', '/transactions', {
@@ -544,6 +547,13 @@ let bankId = 0;
     name: 'Loan Pos', type: 'loan', color: '#a78bfa', openingBalanceCents: 300000,
   });
   check('loan: positive magnitude stored negative', loanPos.status === 201 && loanPos.data.balanceCents === -300000, JSON.stringify(loanPos.data));
+
+  // Loans are managed purely via transfers — a transaction can never link one
+  // (the UI hides the option; this pins the server-side rejection).
+  const txOnLoan = await a.call('POST', '/transactions', {
+    type: 'expense', amountCents: 1234, date: '2026-07-01', note: 'loan tx', categoryId: null, accountId: loanPos.data.id,
+  });
+  check('transaction on a loan account -> 422', txOnLoan.status === 422, `got ${txOnLoan.status}`);
 
   const debitPos = await a.call('POST', '/accounts', {
     name: 'Debit Pos', type: 'debit', color: '#34d399', openingBalanceCents: 75000,
