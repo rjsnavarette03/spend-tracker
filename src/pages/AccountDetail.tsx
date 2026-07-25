@@ -233,8 +233,6 @@ export function AccountDetail() {
   const paySources = accounts.filter(
     (a) => a.id !== account.id && (a.type === 'debit' || a.type === 'credit')
   );
-  // "Borrow again" deposits the borrowed money into a debit account.
-  const borrowDests = accounts.filter((a) => a.type === 'debit');
   // A transfer from this debit account needs another debit account to land in.
   const otherDebits = accounts.filter((a) => a.type === 'debit' && a.id !== account.id);
   const negative = account.balanceCents < 0;
@@ -287,17 +285,10 @@ export function AccountDetail() {
               <PlusIcon /> Add transaction
             </button>
           )}
+          {/* The deposit account is optional (the modal can just grow the
+              debt), so this works even with no debit account. */}
           {account.type === 'loan' && (
-            <button
-              className="btn"
-              onClick={() => setBorrowOpen(true)}
-              disabled={borrowDests.length === 0}
-              title={
-                borrowDests.length === 0
-                  ? 'Add a debit account to receive the borrowed money'
-                  : undefined
-              }
-            >
+            <button className="btn" onClick={() => setBorrowOpen(true)}>
               <CoinsIcon size={16} /> Borrow again
             </button>
           )}
