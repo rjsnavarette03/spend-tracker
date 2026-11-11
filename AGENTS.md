@@ -23,8 +23,9 @@ React SPA (`src/`) talking to a small PHP JSON API (`server/`) under `/api`. No 
 npm install
 npm run dev        # Vite dev server on :5174, proxies /api → http://127.0.0.1:8124 (run a PHP server there)
 npm run typecheck
-npm run build      # typecheck → vite build → dist/
+npm run build      # typecheck → unit tests → vite build → dist/ (a failing test stops the build)
 npm run assemble   # node scripts/build-deploy.mjs → assembles deploy/ (the uploadable site)
+npm test           # unit tests (Vitest) for the Schedule's pure logic, src/schedule.test.ts — no server needed
 npm run test:api   # end-to-end API suite (needs a running server; see below)
 ```
 

@@ -80,7 +80,7 @@ final class DB
      * Auto-migrate on first use. Idempotent and self-healing — safe to run on
      * every connection, under concurrency, and after a partially-applied
      * upgrade (see tryDdl).
-     *   1. If the newest table (`subscriptions`) is missing, replay the
+     *   1. If the newest table (`reminder_sends`) is missing, replay the
      *      full dialect schema (all CREATE ... IF NOT EXISTS — data preserved).
      *   2. Add columns that CREATE IF NOT EXISTS can't express — currently
      *      transactions.account_id, driven off the artifact that is created
@@ -92,10 +92,10 @@ final class DB
         $driver = (string)self::$pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
 
         // Step 1: create any missing tables. Probe the newest table
-        // (subscriptions); if it's absent, replay the whole schema.
+        // (reminder_sends); if it's absent, replay the whole schema.
         $hasNewest = true;
         try {
-            self::$pdo->query('SELECT 1 FROM subscriptions LIMIT 1');
+            self::$pdo->query('SELECT 1 FROM reminder_sends LIMIT 1');
         } catch (PDOException) {
             $hasNewest = false;
         }
@@ -235,6 +235,37 @@ final class DB
                 ? 'ALTER TABLE transfers ADD COLUMN time TEXT NULL'
                 : 'ALTER TABLE transfers ADD COLUMN time CHAR(5) NULL';
             self::tryDdl($col);
+        }
+
+        // Step 10: schedule_items.goal_milestones (savings checkpoints, CSV of
+        // cents ascending; NULL = none) — added after the schedule tables
+        // first shipped, so existing rows simply have none.
+        if (!self::columnExists('schedule_items', 'goal_milestones')) {
+            $col = $driver === 'sqlite'
+                ? 'ALTER TABLE schedule_items ADD COLUMN goal_milestones TEXT NULL'
+                : 'ALTER TABLE schedule_items ADD COLUMN goal_milestones VARCHAR(255) NULL';
+            self::tryDdl($col);
+        }
+
+        // Step 11: reminder email settings on users (opt-in, so existing
+        // accounts start with reminders off). The reminder_sends table comes
+        // from the step-1 replay.
+        $reminderCols = [
+            'reminder_emails' => ['INTEGER NOT NULL DEFAULT 0', 'TINYINT(1) NOT NULL DEFAULT 0'],
+            'timezone' => ['TEXT NULL', 'VARCHAR(64) NULL'],
+            'reminders_run_on' => ['TEXT NULL', 'DATE NULL'],
+            'reminder_token' => ['TEXT NULL', 'CHAR(64) NULL'],
+        ];
+        foreach ($reminderCols as $name => [$sqliteType, $mysqlType]) {
+            if (!self::columnExists('users', $name)) {
+                self::tryDdl("ALTER TABLE users ADD COLUMN $name " . ($driver === 'sqlite' ? $sqliteType : $mysqlType));
+            }
+        }
+
+        // Step 12: accounts.archived_at (archiving settled accounts). NULL for
+        // every existing account, so nothing is archived by the upgrade.
+        if (!self::columnExists('accounts', 'archived_at')) {
+            self::tryDdl('ALTER TABLE accounts ADD COLUMN archived_at ' . ($driver === 'sqlite' ? 'TEXT NULL' : 'DATETIME NULL'));
         }
     }
 

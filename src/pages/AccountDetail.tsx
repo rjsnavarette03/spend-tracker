@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { Transaction, Transfer } from '../../shared/types';
+import { archivedOnLabel, isArchived } from '../accounts';
 import { api } from '../api';
 import { useAppContext } from '../App';
 import { AccountEditModal } from '../components/AccountEditModal';
@@ -11,10 +12,12 @@ import { TransactionModal } from '../components/TransactionModal';
 import { TransferModal } from '../components/TransferModal';
 import { Pager } from '../components/Pager';
 import {
+  ArchiveIcon,
   BanknoteIcon,
   CoinsIcon,
   PencilIcon,
   PlusIcon,
+  RestoreIcon,
   TransferIcon,
   TrashIcon,
 } from '../components/Icons';
@@ -249,9 +252,14 @@ export function AccountDetail() {
       usage.push(`${account.txCount} transaction${account.txCount === 1 ? '' : 's'}`);
     if (account.transferCount > 0)
       usage.push(`${account.transferCount} transfer${account.transferCount === 1 ? '' : 's'}`);
+    // Settled with history: point at Archive, which keeps the links.
+    const archiveHint =
+      usage.length > 0 && account.balanceCents === 0 && account.archivedAt === null
+        ? ' To keep them linked, archive the account instead.'
+        : '';
     const message =
       usage.length > 0
-        ? `${usage.join(' and ')} will keep their history but lose the link to this account.`
+        ? `${usage.join(' and ')} will keep their history but lose the link to this account.${archiveHint}`
         : 'This account will be removed.';
     const ok = await confirm({
       title: `Delete "${account.name}"?`,
@@ -264,6 +272,54 @@ export function AccountDetail() {
       await api.accounts.remove(account.id);
       navigate('/accounts'); // leave the now-deleted detail page
       onDataChanged(); // refresh the shared accounts list
+    } catch (err) {
+      toast.error(cleanError(err));
+    }
+  };
+
+  // A settled account can be archived: off the account lists and pickers,
+  // history untouched. The server pauses Schedule plans that pay into it, so
+  // the dialog names them first.
+  const archiveAccount = async () => {
+    if (!account) return;
+    let plans: string[] = [];
+    try {
+      plans = (await api.schedule.get()).items
+        .filter((i) => i.active && i.accountId === account.id)
+        .map((i) => i.name);
+    } catch {
+      // the dialog just can't name them; the toast still will
+    }
+    const ok = await confirm({
+      title: `Archive "${account.name}"?`,
+      message:
+        'It moves to Archived on the Accounts page and leaves the account pickers. Its history stays ' +
+        `exactly as it is, and recording anything new on it${account.type === 'loan' ? ', like Borrow again,' : ''} ` +
+        'brings it back.' +
+        (plans.length > 0 ? ` The Schedule's plan for it (${plans.join(', ')}) will be paused.` : ''),
+      confirmLabel: 'Archive',
+    });
+    if (!ok) return;
+    try {
+      const r = await api.accounts.archive(account.id);
+      toast.success(
+        r.pausedItems.length > 0
+          ? `Archived ${account.name} · paused in the Schedule: ${r.pausedItems.join(', ')}`
+          : `Archived ${account.name}`
+      );
+      navigate('/accounts'); // where it now sits under Archived
+      onDataChanged();
+    } catch (err) {
+      toast.error(cleanError(err));
+    }
+  };
+
+  const restoreAccount = async () => {
+    if (!account) return;
+    try {
+      await api.accounts.restore(account.id);
+      toast.success(`Restored ${account.name}`);
+      onDataChanged();
     } catch (err) {
       toast.error(cleanError(err));
     }
@@ -285,10 +341,10 @@ export function AccountDetail() {
   }
 
   const paySources = accounts.filter(
-    (a) => a.id !== account.id && (a.type === 'debit' || a.type === 'credit')
+    (a) => a.id !== account.id && (a.type === 'debit' || a.type === 'credit') && !isArchived(a)
   );
   // A transfer from this debit account needs another debit account to land in.
-  const otherDebits = accounts.filter((a) => a.type === 'debit' && a.id !== account.id);
+  const otherDebits = accounts.filter((a) => a.type === 'debit' && a.id !== account.id && !isArchived(a));
   const negative = account.balanceCents < 0;
 
   return (
@@ -312,6 +368,22 @@ export function AccountDetail() {
           <button className="btn" onClick={() => setEditOpen(true)}>
             <PencilIcon /> Edit
           </button>
+          {account.archivedAt !== null ? (
+            <button className="btn" onClick={() => void restoreAccount()}>
+              <RestoreIcon /> Restore
+            </button>
+          ) : (
+            // Only once settled: archiving never hides money or debt.
+            account.balanceCents === 0 && (
+              <button
+                className="btn"
+                onClick={() => void archiveAccount()}
+                title="Put this settled account away; its history stays"
+              >
+                <ArchiveIcon /> Archive
+              </button>
+            )
+          )}
           <button className="btn btn-danger" onClick={() => void removeAccount()}>
             <TrashIcon /> Delete
           </button>
@@ -362,6 +434,17 @@ export function AccountDetail() {
           )}
         </div>
       </div>
+
+      {isArchived(account) && (
+        <div className="archived-banner" role="status">
+          <ArchiveIcon size={16} />
+          <span>
+            Archived {archivedOnLabel(account)}. It's hidden from your accounts and account pickers, and its
+            history is unchanged. Recording anything new on it
+            {account.type === 'loan' ? ', like Borrow again,' : ''} brings it back.
+          </span>
+        </div>
+      )}
 
       <div className="panel account-balance-card">
         <span className="account-balance-label">
@@ -687,9 +770,13 @@ export function AccountDetail() {
                     // What actually moves for THIS account: incoming = +amount;
                     // outgoing = −(amount + fee), since the fee also leaves the source.
                     const delta = incoming ? tr.amountCents : -(tr.amountCents + tr.feeCents);
-                    const other = incoming
-                      ? tr.fromName ?? 'Deleted account'
-                      : tr.toName ?? 'Deleted account';
+                    // Loan borrows may have no destination ("just track what
+                    // you owe") — the row is real, the money landed nowhere.
+                    const route = incoming
+                      ? `From ${tr.fromName ?? 'Deleted account'}`
+                      : tr.toAccountId === null && account.type === 'loan'
+                        ? 'Not deposited'
+                        : `To ${tr.toName ?? 'Deleted account'}`;
                     return (
                       <tr key={tr.id}>
                         <td style={{ whiteSpace: 'nowrap' }}>
@@ -697,8 +784,7 @@ export function AccountDetail() {
                           {tr.time && <span className="time-dim"> · {timeLabel(tr.time)}</span>}
                         </td>
                         <td>
-                          {incoming ? 'From ' : 'To '}
-                          {other}
+                          {route}
                           {tr.note ? ` · ${tr.note}` : ''}
                         </td>
                         <td className={`num ${delta < 0 ? 'amount-expense' : 'amount-income'}`}>

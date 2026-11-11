@@ -10,6 +10,11 @@ CREATE TABLE IF NOT EXISTS users (
     -- DEFAULT 1 grandfathers existing/Google accounts as verified; register()
     -- inserts 0 to force new email/password signups through verification.
     email_verified INTEGER NOT NULL DEFAULT 1,
+    -- Reminder emails, opt-in (see MySQL schema).
+    reminder_emails INTEGER NOT NULL DEFAULT 0,
+    timezone TEXT NULL,
+    reminders_run_on TEXT NULL,
+    reminder_token TEXT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -26,6 +31,8 @@ CREATE TABLE IF NOT EXISTS accounts (
     due_day INTEGER NULL,
     due_day2 INTEGER NULL,
     opening_balance_cents INTEGER NOT NULL DEFAULT 0,
+    -- Archived settled account (see MySQL schema); NULL = active.
+    archived_at TEXT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -123,8 +130,7 @@ CREATE TABLE IF NOT EXISTS email_verifications (
 )
 ;
 
--- Recurring subscriptions (see MySQL schema for full notes). Newest table:
--- DB::ensureSchema probes it to decide whether to replay the schema.
+-- Recurring subscriptions (see MySQL schema for full notes).
 CREATE TABLE IF NOT EXISTS subscriptions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -144,3 +150,62 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_subscriptions_user_due ON subscriptions(user_id, active, next_date);
+
+-- Payment schedule items (see MySQL schema for full notes). funded_by is
+-- not an FK: deleting a payday NULLs it in Repo::deleteScheduleItem.
+CREATE TABLE IF NOT EXISTS schedule_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('income','loan','card','bill','allowance','savings','subscription')),
+    account_id INTEGER NULL REFERENCES accounts(id) ON DELETE SET NULL,
+    subscription_id INTEGER NULL UNIQUE REFERENCES subscriptions(id) ON DELETE CASCADE,
+    category_id INTEGER NULL REFERENCES categories(id) ON DELETE SET NULL,
+    amount_mode TEXT NOT NULL DEFAULT 'fixed' CHECK (amount_mode IN ('fixed','avg3')),
+    amount_cents INTEGER NOT NULL DEFAULT 0,
+    match_keyword TEXT NULL,
+    due_day INTEGER NULL,
+    week_day INTEGER NULL,
+    funded_by INTEGER NULL,
+    weekend_shift TEXT NOT NULL DEFAULT 'none' CHECK (weekend_shift IN ('none','before','after')),
+    start_date TEXT NOT NULL,
+    end_date TEXT NULL,
+    goal_cents INTEGER NULL,
+    goal_milestones TEXT NULL,
+    pay_from_account_id INTEGER NULL REFERENCES accounts(id) ON DELETE SET NULL,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_schedule_items_user ON schedule_items(user_id);
+
+-- Occurrence -> payment links (see MySQL schema).
+CREATE TABLE IF NOT EXISTS schedule_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    item_id INTEGER NOT NULL REFERENCES schedule_items(id) ON DELETE CASCADE,
+    due_date TEXT NOT NULL,
+    transfer_id INTEGER NULL REFERENCES transfers(id) ON DELETE CASCADE,
+    transaction_id INTEGER NULL REFERENCES transactions(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_schedule_payments_user_due ON schedule_payments(user_id, due_date);
+
+CREATE INDEX IF NOT EXISTS idx_schedule_payments_item ON schedule_payments(item_id, due_date);
+
+CREATE INDEX IF NOT EXISTS idx_schedule_payments_transfer ON schedule_payments(transfer_id);
+
+CREATE INDEX IF NOT EXISTS idx_schedule_payments_tx ON schedule_payments(transaction_id);
+
+-- Reminders already emailed (see MySQL schema). Newest table:
+-- DB::ensureSchema probes it to decide whether to replay the schema.
+CREATE TABLE IF NOT EXISTS reminder_sends (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    reminder_key TEXT NOT NULL,
+    sent_on TEXT NOT NULL,
+    UNIQUE (user_id, reminder_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_reminder_sends_sent ON reminder_sends(sent_on);

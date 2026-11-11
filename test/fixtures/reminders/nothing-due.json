@@ -1,0 +1,138 @@
+{
+  "about": "A quiet day: the bill and salary are settled, past allowance weeks have lapsed, and the next allowance and subscription charge are more than 3 days away — no reminders, so no email.",
+  "today": "2026-10-28",
+  "accounts": [
+    {
+      "id": 1,
+      "name": "GCash",
+      "type": "debit",
+      "color": "#888888",
+      "image": null,
+      "dueDay": null,
+      "dueDay2": null,
+      "openingBalanceCents": 500000,
+      "balanceCents": 500000,
+      "archivedAt": null,
+      "txCount": 0,
+      "transferCount": 0
+    }
+  ],
+  "subscriptions": [
+    {
+      "id": 1,
+      "name": "Netflix",
+      "amountCents": 54900,
+      "accountId": 1,
+      "accountName": null,
+      "accountColor": null,
+      "categoryId": null,
+      "categoryName": null,
+      "categoryColor": null,
+      "cycle": "monthly",
+      "billDay": 15,
+      "intervalDays": null,
+      "nextDate": "2026-11-15",
+      "active": true
+    }
+  ],
+  "schedule": {
+    "items": [
+      {
+        "id": 1,
+        "name": "Water",
+        "kind": "bill",
+        "accountId": null,
+        "subscriptionId": null,
+        "categoryId": null,
+        "amountMode": "fixed",
+        "amountCents": 60000,
+        "matchKeyword": null,
+        "dueDay": 15,
+        "weekDay": null,
+        "fundedBy": null,
+        "weekendShift": "none",
+        "startDate": "2026-10-01",
+        "endDate": null,
+        "goalCents": null,
+        "goalMilestones": [],
+        "payFromAccountId": null,
+        "active": true,
+        "estimateCents": null,
+        "estimateFrom": null,
+        "estimateTo": null
+      },
+      {
+        "id": 2,
+        "name": "Salary",
+        "kind": "income",
+        "accountId": 1,
+        "subscriptionId": null,
+        "categoryId": null,
+        "amountMode": "fixed",
+        "amountCents": 2000000,
+        "matchKeyword": null,
+        "dueDay": 15,
+        "weekDay": null,
+        "fundedBy": null,
+        "weekendShift": "none",
+        "startDate": "2026-10-01",
+        "endDate": null,
+        "goalCents": null,
+        "goalMilestones": [],
+        "payFromAccountId": null,
+        "active": true,
+        "estimateCents": null,
+        "estimateFrom": null,
+        "estimateTo": null
+      },
+      {
+        "id": 3,
+        "name": "Snacks",
+        "kind": "allowance",
+        "accountId": null,
+        "subscriptionId": null,
+        "categoryId": null,
+        "amountMode": "fixed",
+        "amountCents": 50000,
+        "matchKeyword": null,
+        "dueDay": null,
+        "weekDay": 1,
+        "fundedBy": null,
+        "weekendShift": "none",
+        "startDate": "2026-10-01",
+        "endDate": null,
+        "goalCents": null,
+        "goalMilestones": [],
+        "payFromAccountId": null,
+        "active": true,
+        "estimateCents": null,
+        "estimateFrom": null,
+        "estimateTo": null
+      }
+    ],
+    "payments": [
+      {
+        "id": 1,
+        "itemId": 1,
+        "dueDate": "2026-10-15",
+        "transferId": null,
+        "transactionId": 901,
+        "amountCents": 60000,
+        "paidDate": "2026-10-15"
+      }
+    ],
+    "activity": [
+      {
+        "source": "transaction",
+        "id": 902,
+        "type": "income",
+        "accountId": 1,
+        "categoryId": null,
+        "date": "2026-10-15",
+        "amountCents": 2000000,
+        "note": "Salary"
+      }
+    ]
+  },
+  "expected": []
+}

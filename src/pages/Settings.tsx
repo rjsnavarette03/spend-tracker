@@ -1,9 +1,29 @@
 import { FormEvent, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import type { User } from '../../shared/types';
 import { api } from '../api';
 import { toast } from '../components/feedback';
-import { CheckIcon, EyeIcon, EyeOffIcon, KeyIcon, TrashIcon } from '../components/Icons';
+import { CheckIcon, EyeIcon, EyeOffIcon, KeyIcon, TagIcon, TrashIcon } from '../components/Icons';
 import { cleanError } from '../format';
+import { REMIND_DAYS } from '../schedule';
+
+// When the daily reminder email goes out, in the user's time zone (the
+// server's ReminderEmail::SEND_HOUR).
+const REMINDER_EMAIL_HOUR = 7;
+
+/** This device's IANA time zone ('Asia/Manila'), or '' if the browser won't say. */
+function deviceTimezone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone ?? '';
+  } catch {
+    return '';
+  }
+}
+
+/** 'America/Argentina/Buenos_Aires' → 'Buenos Aires'. */
+function zoneCity(tz: string): string {
+  return (tz.split('/').pop() ?? tz).replace(/_/g, ' ');
+}
 
 // Curated list; the server accepts any valid 3-letter code and the formatter
 // falls back gracefully, so this can grow freely.
@@ -39,7 +59,8 @@ function previewAmount(code: string): string {
 }
 
 // Account settings page (/settings): currency and password each live in their
-// own card with their own Save button (independent saves), plus a visually
+// own card with their own Save button (independent saves), reminder emails
+// switch on/off on the spot, plus a visually
 // separated danger zone whose delete flow is progressively disclosed and — for
 // accounts with a password — re-confirmed with it.
 export function Settings({ user, refreshUser }: { user: User; refreshUser: () => void }) {
@@ -56,6 +77,19 @@ export function Settings({ user, refreshUser }: { user: User; refreshUser: () =>
   const [show, setShow] = useState(false);
   const [pwError, setPwError] = useState('');
   const [savingPassword, setSavingPassword] = useState(false);
+
+  // Reminder emails switch on and off right away (no Save). Turning them on
+  // saves this device's time zone, so 7 AM is the user's 7 AM.
+  const [remindersOn, setRemindersOn] = useState(user.reminderEmails);
+  const [reminderTz, setReminderTz] = useState(user.reminderTimezone);
+  const [savingReminders, setSavingReminders] = useState(false);
+  const [remindersError, setRemindersError] = useState('');
+  const [confirmationSent, setConfirmationSent] = useState(false);
+  const deviceTz = deviceTimezone();
+  useEffect(() => {
+    setRemindersOn(user.reminderEmails);
+    setReminderTz(user.reminderTimezone);
+  }, [user.reminderEmails, user.reminderTimezone]);
 
   // Danger zone: the delete confirmation is revealed on demand.
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -125,6 +159,26 @@ export function Settings({ user, refreshUser }: { user: User; refreshUser: () =>
       setPwError(cleanError(err));
     } finally {
       setSavingPassword(false);
+    }
+  };
+
+  /** On, off, or (already on) move the 7 AM to this device's time zone. */
+  const saveReminders = async (enabled: boolean) => {
+    setRemindersError('');
+    setSavingReminders(true);
+    const wasOn = remindersOn;
+    try {
+      const r = await api.auth.setReminders(enabled, enabled ? deviceTz : null);
+      setRemindersOn(r.reminderEmails);
+      setReminderTz(r.reminderTimezone);
+      // Turning on from off emails a confirmation (see ReminderEmail::turnedOn).
+      setConfirmationSent(enabled && !wasOn);
+      refreshUser();
+      toast.success(!enabled ? 'Reminder emails off' : wasOn ? 'Reminder time zone updated' : 'Reminder emails on');
+    } catch (err) {
+      setRemindersError(cleanError(err));
+    } finally {
+      setSavingReminders(false);
     }
   };
 
@@ -203,6 +257,85 @@ export function Settings({ user, refreshUser }: { user: User; refreshUser: () =>
             </button>
           </div>
         </form>
+
+        <div className="panel form-grid">
+          <div className="panel-title" style={{ marginBottom: 0 }}>
+            Email reminders
+          </div>
+          <div className="field-hint">
+            An email around {REMINDER_EMAIL_HOUR}:00 AM on days something needs your attention: bills and
+            payments due today or in the next {REMIND_DAYS} days, anything overdue, and paydays whose salary
+            isn't logged yet. The same list as the bell, at most one email a day.
+          </div>
+          <div className="field">
+            <label id="set-reminders">Reminder emails</label>
+            <div
+              className="segmented"
+              role="group"
+              aria-labelledby="set-reminders"
+              style={{ alignSelf: 'flex-start' }}
+            >
+              <button
+                type="button"
+                className={!remindersOn ? 'active-account' : ''}
+                aria-pressed={!remindersOn}
+                disabled={savingReminders}
+                onClick={() => remindersOn && void saveReminders(false)}
+              >
+                Off
+              </button>
+              <button
+                type="button"
+                className={remindersOn ? 'active-account' : ''}
+                aria-pressed={remindersOn}
+                disabled={savingReminders}
+                onClick={() => !remindersOn && void saveReminders(true)}
+              >
+                On
+              </button>
+            </div>
+            {remindersOn && reminderTz && (
+              <div className="field-hint">
+                Sent to {user.email} around {REMINDER_EMAIL_HOUR}:00 AM {zoneCity(reminderTz)} time.
+                {deviceTz !== '' && deviceTz !== reminderTz && (
+                  <>
+                    {' '}This device is on {zoneCity(deviceTz)} time —{' '}
+                    <button
+                      type="button"
+                      className="link-btn"
+                      disabled={savingReminders}
+                      onClick={() => void saveReminders(true)}
+                    >
+                      use {zoneCity(deviceTz)} time
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+          {confirmationSent && remindersOn && (
+            <div className="notice notice-block">
+              We sent a confirmation to {user.email}. If it isn't in your inbox, check spam and mark it as not
+              spam, so the reminders get through.
+            </div>
+          )}
+          {remindersError && <div className="form-error" role="alert">{remindersError}</div>}
+        </div>
+
+        {/* Categories has no slot in the mobile tab bar, so it's reached from here. */}
+        <div className="panel form-grid">
+          <div className="panel-title" style={{ marginBottom: 0 }}>
+            Categories
+          </div>
+          <div className="field-hint">
+            The income and expense categories used by transactions, budgets and bills.
+          </div>
+          <div className="form-actions">
+            <Link to="/categories" className="btn">
+              <TagIcon /> Manage categories
+            </Link>
+          </div>
+        </div>
 
         <form className="panel form-grid" onSubmit={submitPassword}>
           <div className="panel-title" style={{ marginBottom: 0 }}>

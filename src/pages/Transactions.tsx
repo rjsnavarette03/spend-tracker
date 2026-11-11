@@ -68,7 +68,7 @@ const ROW_SORTS: SortOption<Row>[] = [
   },
 ];
 
-function rowsToCsv(rows: Row[]): string {
+function rowsToCsv(rows: Row[], badgeOf: (tr: Transfer) => string): string {
   const esc = (v: string) => `"${String(v).replace(/"/g, '""')}"`;
   const lines = ['Date,Time,Type,Category,Account,Note,Amount'];
   for (const r of rows) {
@@ -93,7 +93,11 @@ function rowsToCsv(rows: Row[]): string {
           tr.time ?? '',
           'transfer',
           esc('Transfer'),
-          esc(`${tr.fromName ?? 'Deleted account'} → ${tr.toName ?? 'Deleted account'}`),
+          esc(
+            `${tr.fromName ?? 'Deleted account'} → ${
+              tr.toName ?? (badgeOf(tr) === 'Borrowed' ? 'Not deposited' : 'Deleted account')
+            }`
+          ),
           esc(tr.feeCents > 0 ? `${tr.note} (fee ${(tr.feeCents / 100).toFixed(2)})` : tr.note),
           (tr.amountCents / 100).toFixed(2),
         ].join(',')
@@ -226,6 +230,9 @@ export function Transactions({
     if (accountType(tr.fromAccountId) === 'loan') return 'Borrowed';
     return 'Transfer';
   };
+  // A borrow may have no destination ("just track what you owe").
+  const toLabel = (tr: Transfer) =>
+    tr.toName ?? (transferBadge(tr) === 'Borrowed' ? 'Not deposited' : 'Deleted account');
 
   // Export / totals cover the full matched set (all pages, after search), not
   // just the current page. Totals count REAL income/spending only — transfers
@@ -234,7 +241,7 @@ export function Transactions({
   const exportCsv = () => {
     downloadFile(
       `transactions-${period.start}_${period.end}.csv`,
-      rowsToCsv(matched),
+      rowsToCsv(matched, transferBadge),
       'text/csv;charset=utf-8'
     );
     setNotice(`Exported ${matched.length} ${matched.length === 1 ? 'entry' : 'entries'}`);
@@ -436,7 +443,7 @@ export function Transactions({
                         </span>
                         <span
                           className="cat-chip account-chip"
-                          title={`${r.tr.fromName ?? 'Deleted account'} → ${r.tr.toName ?? 'Deleted account'}`}
+                          title={`${r.tr.fromName ?? 'Deleted account'} → ${toLabel(r.tr)}`}
                         >
                           <span
                             className="color-dot"
@@ -448,7 +455,7 @@ export function Transactions({
                             className="color-dot"
                             style={{ background: r.tr.toColor ?? '#64748b' }}
                           />
-                          <span>{r.tr.toName ?? 'Deleted account'}</span>
+                          <span>{toLabel(r.tr)}</span>
                         </span>
                       </span>
                     </td>
@@ -461,19 +468,20 @@ export function Transactions({
                       )}
                     </td>
                     {/* Cash perspective: a Payment drains spendable money (red −),
-                        a Borrow adds to it (green +); a plain move stays neutral. */}
+                        a deposited Borrow adds to it (green +); a plain move —
+                        or a borrow that landed nowhere — stays neutral. */}
                     <td
                       className={`num ${
                         transferBadge(r.tr) === 'Payment'
                           ? 'amount-expense'
-                          : transferBadge(r.tr) === 'Borrowed'
+                          : transferBadge(r.tr) === 'Borrowed' && r.tr.toAccountId !== null
                             ? 'amount-income'
                             : ''
                       }`}
                     >
                       {transferBadge(r.tr) === 'Payment'
                         ? '−'
-                        : transferBadge(r.tr) === 'Borrowed'
+                        : transferBadge(r.tr) === 'Borrowed' && r.tr.toAccountId !== null
                           ? '+'
                           : ''}
                       {fmtMoney(r.tr.amountCents)}

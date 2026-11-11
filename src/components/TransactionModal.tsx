@@ -1,5 +1,6 @@
 import { FormEvent, useMemo, useState } from 'react';
 import type { Account, Category, Transaction, TxType } from '../../shared/types';
+import { isArchived } from '../accounts';
 import { api } from '../api';
 import { centsToInput, cleanError, fmtMoney, nowTimeHm, parseAmountToCents, todayStr } from '../format';
 import { CheckIcon, PlusIcon } from './Icons';
@@ -55,13 +56,13 @@ export function TransactionModal({
   //  - expenses: debit or credit (you pay from cash/bank or a card)
   //  - income:   debit only (money is received into cash/bank, not onto a card)
   // Loans are never used here — they're moved via transfers.
-  const debitAccounts = useMemo(() => accounts.filter((a) => a.type === 'debit'), [accounts]);
+  const debitAccounts = useMemo(() => accounts.filter((a) => a.type === 'debit' && !isArchived(a)), [accounts]);
   const creditAccounts = useMemo(
-    () => (type === 'expense' ? accounts.filter((a) => a.type === 'credit') : []),
+    () => (type === 'expense' ? accounts.filter((a) => a.type === 'credit' && !isArchived(a)) : []),
     [accounts, type]
   );
   // Preserve a previously-linked account that's no longer selectable (e.g. a
-  // loan, or a credit account on an income tx) so editing doesn't silently drop it.
+  // loan, an archived account, or a credit account on an income tx) so editing doesn't silently drop it.
   const preservedAccount =
     accountId &&
     !debitAccounts.some((a) => String(a.id) === accountId) &&

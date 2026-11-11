@@ -91,6 +91,21 @@ export const TrashIcon = ({ size }: IconProps) => (
   </svg>
 );
 
+export const ArchiveIcon = ({ size }: IconProps) => (
+  <svg {...base(size ?? 15)}>
+    <rect x="2" y="3" width="20" height="5" rx="1" />
+    <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" />
+    <line x1="10" y1="12" x2="14" y2="12" />
+  </svg>
+);
+
+export const RestoreIcon = ({ size }: IconProps) => (
+  <svg {...base(size ?? 15)}>
+    <polyline points="1 4 1 10 7 10" />
+    <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+  </svg>
+);
+
 export const DownloadIcon = ({ size }: IconProps) => (
   <svg {...base(size ?? 16)}>
     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -266,5 +281,26 @@ export const BanknoteIcon = ({ size }: IconProps) => (
     <rect x="2" y="6" width="20" height="12" rx="2" />
     <circle cx="12" cy="12" r="2" />
     <path d="M6 12h.01M18 12h.01" />
+  </svg>
+);
+
+export const SparkleIcon = ({ size }: IconProps) => (
+  <svg {...base(size)}>
+    <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z" />
+    <path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15z" />
+  </svg>
+);
+
+export const SendIcon = ({ size }: IconProps) => (
+  <svg {...base(size)}>
+    <path d="M22 2 11 13" />
+    <path d="M22 2 15 22l-4-9-9-4 20-7z" />
+  </svg>
+);
+
+export const BellIcon = ({ size }: IconProps) => (
+  <svg {...base(size)}>
+    <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+    <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
   </svg>
 );

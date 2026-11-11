@@ -4,7 +4,7 @@ import { WalletIcon } from '../components/Icons';
 // Standalone legal pages, reachable whether signed in or out (routed directly
 // in AppRoot). Plain-language and tailored to what SpendTracker actually does.
 // Not legal advice — have a professional review before/at commercial launch.
-const UPDATED = 'July 7, 2026';
+const UPDATED = 'November 11, 2026';
 const CONTACT = 'support@savneria.com';
 
 export function LegalPage({ doc }: { doc: 'privacy' | 'terms' }) {
@@ -96,6 +96,9 @@ function PrivacyBody() {
         <li>To create and secure your account and keep you signed in.</li>
         <li>To protect the Service — rate-limiting sign-in attempts and preventing abuse.</li>
         <li>To send account-related emails, such as password-reset links you request.</li>
+        <li>
+          To answer the questions you ask the in-app AI assistant, only when you ask one.
+        </li>
       </ul>
 
       <h2>Cookies</h2>
@@ -121,6 +124,19 @@ function PrivacyBody() {
         <li>
           <strong>Email delivery.</strong> Password-reset emails are sent from our mail server
           (noreply@budgettracker.rjsnavarette.com).
+        </li>
+        {/* Names the provider in config.php's 'ai' section: keep in step if it changes. */}
+        <li>
+          <strong>AI assistant (only when you use it).</strong> When you ask the assistant (the
+          chat bubble in the corner of the app) a question, we send your question, your recent messages in that chat, and a
+          summary of your financial data to Groq, Inc., which runs the AI model that writes the
+          answer. The summary includes account names and balances, monthly totals, spending by
+          category, budgets, subscriptions, this month&apos;s transfers, upcoming bills from your
+          Schedule, and any transactions the assistant looks up to answer you (with their notes).
+          It does not include your email address, password or account images. Groq states that it
+          does not use this data to train its models. We don&apos;t store your conversation; it stays
+          in your browser until you reload the page. If you don&apos;t want this data shared, don&apos;t
+          use the assistant.
         </li>
         <li>
           <strong>Legal reasons.</strong> We may disclose information if required by law or to
@@ -247,6 +263,12 @@ function TermsBody() {
         organize your money. It does not provide financial, investment, tax, accounting, or legal
         advice, and its totals and calculations are for your convenience only. Verify anything
         important yourself before relying on it.
+      </p>
+      <p>
+        <strong>AI assistant.</strong> Answers from the in-app AI assistant are generated
+        automatically and can be incomplete or wrong. They are not financial advice. Each account
+        can ask a limited number of questions per day, and we may change or remove the assistant
+        at any time.
       </p>
 
       <h2>Availability and changes</h2>

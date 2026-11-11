@@ -1,5 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import type { Account, Category, Subscription, SubscriptionCycle } from '../../shared/types';
+import { isArchived } from '../accounts';
 import { api } from '../api';
 import { useAppContext } from '../App';
 import { confirm, toast } from '../components/feedback';
@@ -134,9 +135,9 @@ export function Subscriptions() {
           <button
             className="btn btn-primary"
             onClick={() => setModal({ open: true, editing: null })}
-            disabled={accounts.filter((a) => a.type !== 'loan').length === 0}
+            disabled={accounts.filter((a) => a.type !== 'loan' && !isArchived(a)).length === 0}
             title={
-              accounts.filter((a) => a.type !== 'loan').length === 0
+              accounts.filter((a) => a.type !== 'loan' && !isArchived(a)).length === 0
                 ? 'Add a debit or credit account first'
                 : undefined
             }
@@ -157,7 +158,7 @@ export function Subscriptions() {
           <button
             className="btn btn-primary"
             onClick={() => setModal({ open: true, editing: null })}
-            disabled={accounts.filter((a) => a.type !== 'loan').length === 0}
+            disabled={accounts.filter((a) => a.type !== 'loan' && !isArchived(a)).length === 0}
           >
             <PlusIcon /> Add your first subscription
           </button>
@@ -298,8 +299,10 @@ function SubscriptionModal({
   const [saving, setSaving] = useState(false);
 
   // Charges are expenses paid from cash/bank or onto a card — never a loan.
-  const debitAccounts = useMemo(() => accounts.filter((a) => a.type === 'debit'), [accounts]);
-  const creditAccounts = useMemo(() => accounts.filter((a) => a.type === 'credit'), [accounts]);
+  // Archived accounts aren't offered, except the one an edited subscription uses.
+  const offered = (a: Account) => !isArchived(a) || a.id === initial?.accountId;
+  const debitAccounts = useMemo(() => accounts.filter((a) => a.type === 'debit' && offered(a)), [accounts, initial]);
+  const creditAccounts = useMemo(() => accounts.filter((a) => a.type === 'credit' && offered(a)), [accounts, initial]);
   const expenseCategories = useMemo(
     () => categories.filter((c) => c.type === 'expense'),
     [categories]

@@ -1308,6 +1308,71 @@ select {
   margin: 2px 0 0;
 }
 
+/* Archived (settled) accounts: a <details> panel under the type sections,
+   collapsed by default; the summary reads like a section title. */
+.archived-panel summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+}
+.archived-panel summary::-webkit-details-marker {
+  display: none;
+}
+.archived-panel summary .section-hint {
+  display: block;
+  margin: 2px 0 0;
+}
+.archived-panel summary::after {
+  content: '';
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  margin-right: 4px;
+  border-right: 2px solid var(--text-dim);
+  border-bottom: 2px solid var(--text-dim);
+  transform: rotate(45deg);
+  transition: transform 0.15s;
+}
+.archived-panel[open] summary {
+  margin-bottom: 12px;
+}
+.archived-panel[open] summary::after {
+  transform: rotate(-135deg);
+}
+.archived-type {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.archived-on {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+/* On an archived account's own page, above the balance. */
+.archived-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.archived-banner svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
 /* The section subtotal is the card's headline number — size it like a stat
    value (between the 18px assets/liabilities and the 24px dashboard stats),
    not like the 14px title text it sits next to. */
@@ -2480,6 +2545,654 @@ select {
   color: var(--red);
 }
 
+/* Settled (Schedule: salary received / bill paid). */
+.due-tag.due-ok {
+  background: var(--green-dim);
+  color: var(--green);
+}
+
+/* ---------- schedule ---------- */
+
+/* Secondary label after a row's date, e.g. "Fri, Nov 7  Payday 8th". */
+.sched-dim {
+  font-weight: 500;
+  color: var(--text-dim);
+}
+
+/* Planner | Setup switch under the page title. */
+.sched-views {
+  margin-bottom: 12px;
+}
+
+.sched-intro {
+  margin-bottom: 14px;
+}
+
+/* ----- payday planner: one card per payday ----- */
+
+.plan-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  gap: 14px;
+}
+
+.plan-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* Over-allocated: more planned than the payday brings in. */
+.plan-over {
+  border-color: var(--red);
+  box-shadow: inset 3px 0 0 var(--red);
+}
+
+.plan-grid + .plan-card,
+.plan-card + .plan-grid {
+  margin-top: 14px;
+}
+
+.plan-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.plan-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.plan-title .sub-name {
+  flex-wrap: wrap;
+  gap: 2px 8px;
+}
+
+.plan-income {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.plan-lines {
+  border-top: 1px solid var(--border);
+}
+
+.plan-line {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr) auto 30px;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 2px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.plan-line-date {
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.plan-line-name {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px 8px;
+  min-width: 0;
+}
+
+.plan-line-amount {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Settled lines recede; what's still owed stands out. */
+.plan-line-paid .plan-line-amount,
+.plan-line-paid .plan-line-name > span:first-child {
+  color: var(--text-dim);
+}
+
+.plan-line-action {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* The one-tap pay action reads as an action, not a decoration. */
+.plan-pay {
+  color: var(--accent);
+}
+
+.plan-empty {
+  padding: 10px 2px;
+}
+
+.plan-totals {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.plan-totals strong {
+  font-weight: 700;
+}
+
+.plan-totals > span:first-child strong {
+  color: var(--text);
+}
+
+.plan-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 14px;
+}
+
+/* ----- calendar: month grid of paydays and due dates ----- */
+
+.cal-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin-bottom: 12px;
+}
+
+.cal-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cal-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.cal-weekday {
+  padding: 0 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  text-align: center;
+  color: var(--text-dim);
+}
+
+.cal-day {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  min-width: 0;
+  min-height: 96px;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cal-day:hover {
+  border-color: var(--border-strong);
+}
+
+.cal-out {
+  opacity: 0.45;
+}
+
+.cal-selected {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.cal-num {
+  align-self: flex-start;
+  padding: 0 6px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.cal-today .cal-num {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* One chip per payday / due date; state = symbol + color, never color alone. */
+.cal-chip {
+  display: block;
+  padding: 1px 6px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: var(--surface-3);
+  color: var(--text-dim);
+}
+
+.cal-legend .cal-chip {
+  display: inline-block;
+}
+
+.cal-chip-payday {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--green);
+  color: var(--green);
+}
+
+.cal-chip-paid {
+  background: var(--green-dim);
+  color: var(--green);
+}
+
+.cal-chip-atrisk {
+  background: rgba(245, 158, 11, 0.14);
+  color: var(--amber, #f59e0b);
+}
+
+.cal-chip-overdue {
+  background: var(--red-dim);
+  color: var(--red);
+}
+
+.cal-chip-past {
+  opacity: 0.6;
+}
+
+.cal-more {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* Phones: the cell is too narrow for names — dots, with the list below. */
+.cal-dots {
+  display: none;
+}
+
+.cal-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.cal-dot-payday {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--green);
+}
+
+.cal-dot-paid {
+  background: var(--green);
+}
+
+.cal-dot-atrisk {
+  background: var(--amber, #f59e0b);
+}
+
+.cal-dot-overdue {
+  background: var(--red);
+}
+
+@media (max-width: 860px) {
+  .sched-views {
+    display: flex;
+  }
+
+  .sched-views button {
+    flex: 1;
+    padding: 8px 4px;
+  }
+
+  .cal-day {
+    align-items: center;
+    min-height: 52px;
+    padding: 4px 2px;
+  }
+
+  .cal-num {
+    align-self: center;
+  }
+
+  .cal-day .cal-chip,
+  .cal-more {
+    display: none;
+  }
+
+  .cal-dots {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 3px;
+  }
+}
+
+/* Savings form: one milestone amount per row, with its remove button. */
+.milestone-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.milestone-row > :first-child {
+  flex: 1;
+}
+
+.milestone-add {
+  align-self: flex-start;
+}
+
+/* ----- progress: debt payoff ----- */
+
+/* The what-if answer reads as the headline of its panel. */
+.whatif-result {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--green-dim);
+  color: var(--text);
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+/* ----- reminders (bell in the app chrome + its panel) ----- */
+
+.bell-btn {
+  position: relative;
+}
+
+/* Count of reminders not seen yet, on the bell's top-right corner. */
+.bell-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--red);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.mobile-topbar-actions .bell-badge {
+  top: 6px;
+  right: 6px;
+}
+
+.reminder-group .sched-group-title {
+  padding-bottom: 6px;
+}
+
+/* ----- progress: savings goals ----- */
+
+.goal {
+  padding: 12px 4px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.goal:last-child {
+  border-bottom: none;
+}
+
+.goal-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+
+/* Milestone ticks sit on the bar; the bar's own overflow clips nothing at 0–100%. */
+.goal-bar {
+  position: relative;
+  height: 10px;
+  margin-top: 10px;
+}
+
+.goal-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--text-faint);
+}
+
+.goal-tick-reached {
+  background: var(--surface);
+  opacity: 0.7;
+}
+
+.goal-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+/* The milestone being worked toward. */
+.due-tag.goal-next {
+  background: rgba(99, 102, 241, 0.14);
+  color: var(--text);
+}
+
+.goal-next-line {
+  margin-top: 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+/* ----- cash forecast ----- */
+
+.sched-note {
+  margin-top: 10px;
+}
+
+.fc-ok {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--green);
+  font-weight: 600;
+}
+
+.fc-short-row {
+  padding: 9px 2px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13.5px;
+}
+
+.fc-amounts {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+}
+
+.fc-chart {
+  position: relative;
+}
+
+.fc-chart svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  touch-action: pan-y; /* horizontal drags scrub the crosshair, vertical ones scroll */
+  outline: none;
+}
+
+.fc-chart svg:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.fc-tooltip {
+  position: absolute;
+  top: 4px;
+  z-index: 2;
+  pointer-events: none;
+  min-width: 160px;
+  max-width: 250px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.fc-tooltip-center {
+  transform: translateX(-50%);
+}
+
+.fc-tooltip-right {
+  transform: translateX(-100%);
+}
+
+.fc-tooltip-value {
+  margin: 1px 0 4px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.fc-tooltip-row {
+  display: flex;
+  gap: 6px;
+}
+
+.fc-tooltip-row .num {
+  color: var(--text);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Three totals that wrap (no dividers) at phone width. */
+.sched-summary {
+  flex-wrap: wrap;
+  gap: 12px 28px;
+}
+
+.sched-group + .sched-group {
+  margin-top: 14px;
+}
+
+.sched-group-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0 4px 2px;
+}
+
+/* Meta parts joined with a dot; the dot rides on the following part so
+   wrapping never leaves one dangling at a line end. */
+.sched-meta-part + .sched-meta-part::before {
+  content: '·';
+  margin-right: 6px;
+  color: var(--text-faint);
+}
+
+.sched-warn {
+  color: var(--amber, #f59e0b);
+  font-weight: 600;
+}
+
+.sched-unit {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-dim);
+}
+
+/* Not-yet-scheduled loan/card accounts. */
+.sched-suggest .sub-name {
+  color: var(--text-dim);
+}
+
+/* Inline text action inside a hint, e.g. "Use 5". */
+.link-button {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+/* Dated rows: [date + notes] [amount + status] [action] stay on one line even
+   at phone width — the notes wrap inside the first column instead. */
+.sched-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.sched-row .sub-name {
+  flex-wrap: wrap;
+  gap: 2px 8px;
+}
+
+@media (max-width: 860px) {
+  .sched-log-label {
+    display: none; /* icon-only on phones; title/aria name still says "Log received" */
+  }
+
+  /* Payday rules wrap onto a second line: amount at the left, actions right. */
+  .sched-rule .sub-right {
+    align-items: flex-start;
+  }
+
+  .sched-rule .sub-actions {
+    margin-left: auto;
+  }
+
+  /* Item details stack one per line instead of wrapping mid-sentence. */
+  .sched-item .sub-meta {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+  }
+
+  .sched-item .sched-meta-part + .sched-meta-part::before {
+    content: none;
+  }
+
+  /* Phones: the status matters more than the kind on a crowded line. */
+  .plan-kind {
+    display: none;
+  }
+
+  .plan-line {
+    grid-template-columns: 70px minmax(0, 1fr) auto 36px;
+    gap: 6px;
+  }
+}
+
 .sort-label {
   font-size: 12.5px;
   font-weight: 600;
@@ -3504,5 +4217,349 @@ select.budget-cadence {
 
   .pager {
     gap: 12px 16px;
+  }
+}
+
+/* ---------- AI assistant: the floating "Ask about your money" chat ---------- */
+
+/* While the bubble shows (body.has-assistant, set by AssistantWidget), keep
+   the page's last row and the toasts out from under it. */
+.has-assistant .main {
+  padding-bottom: 104px;
+}
+
+.has-assistant .toast-container {
+  bottom: 92px;
+}
+
+.assistant-bubble {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 40; /* above page content and the mobile chrome (30), below modals (50) */
+  width: 56px;
+  height: 56px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 10px 28px rgba(79, 70, 229, 0.45), 0 2px 6px rgba(0, 0, 0, 0.3);
+  transition: background 0.15s, transform 0.15s;
+}
+
+.assistant-bubble:hover {
+  background: var(--accent-hover);
+  transform: translateY(-1px);
+}
+
+.assistant-bubble:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: 3px;
+}
+
+.assistant-unread {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--red);
+  border: 2px solid var(--bg);
+}
+
+.assistant-window {
+  position: fixed;
+  right: 24px;
+  bottom: 92px;
+  z-index: 40;
+  width: 384px;
+  height: min(600px, calc(100vh - 124px));
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+[data-theme='light'] .assistant-window {
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18);
+}
+
+[data-theme='light'] .assistant-bubble {
+  box-shadow: 0 10px 28px rgba(79, 70, 229, 0.35), 0 2px 6px rgba(15, 23, 42, 0.15);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .assistant-window {
+    transform-origin: bottom right;
+    animation: assistant-pop 0.16s ease-out;
+  }
+}
+
+@keyframes assistant-pop {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.assistant-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 10px 12px 14px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.assistant-avatar {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+}
+
+.assistant-head-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.assistant-head-title {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.assistant-head-sub {
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.assistant-log {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.assistant-msg {
+  max-width: 88%;
+  padding: 9px 13px;
+  border-radius: 14px;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.assistant-msg.user {
+  align-self: flex-end;
+  background: var(--accent);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+  white-space: pre-wrap;
+}
+
+.assistant-msg.bot {
+  align-self: flex-start;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-bottom-left-radius: 4px;
+}
+
+.assistant-msg.bot p,
+.assistant-msg.bot ul,
+.assistant-msg.bot ol {
+  margin: 0;
+}
+
+.assistant-msg.bot > * + * {
+  margin-top: 6px;
+}
+
+.assistant-msg.bot ul,
+.assistant-msg.bot ol {
+  padding-left: 20px;
+}
+
+.assistant-thinking {
+  display: inline-flex;
+  gap: 5px;
+  padding: 13px 15px;
+}
+
+.assistant-thinking span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  opacity: 0.4;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .assistant-thinking span {
+    animation: assistant-dot 1.2s infinite ease-in-out;
+  }
+  .assistant-thinking span:nth-child(2) {
+    animation-delay: 0.15s;
+  }
+  .assistant-thinking span:nth-child(3) {
+    animation-delay: 0.3s;
+  }
+}
+
+@keyframes assistant-dot {
+  0%,
+  80%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+.assistant-suggestions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+}
+
+.assistant-chip {
+  padding: 7px 13px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.assistant-chip:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--surface-2);
+}
+
+.assistant-chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.assistant-bottom {
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.assistant-error {
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--red);
+}
+
+.assistant-form {
+  display: flex;
+  gap: 8px;
+}
+
+.assistant-form input {
+  flex: 1;
+  min-width: 0;
+}
+
+.assistant-form .btn {
+  justify-content: center;
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+.assistant-foot {
+  margin: 8px 0 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-faint);
+}
+
+.assistant-foot a {
+  color: var(--text-dim);
+}
+
+@media (max-width: 860px) {
+  .has-assistant .main {
+    padding-bottom: calc(150px + env(safe-area-inset-bottom));
+  }
+
+  .has-assistant .toast-container {
+    bottom: calc(136px + env(safe-area-inset-bottom));
+  }
+
+  /* Above the bottom tab bar. */
+  .assistant-bubble {
+    right: 16px;
+    bottom: calc(76px + env(safe-area-inset-bottom));
+    width: 52px;
+    height: 52px;
+  }
+
+  /* The window has its own close button and covers the bubble's spot. */
+  .assistant-bubble.is-open {
+    display: none;
+  }
+
+  /* Full screen on phones, over the top bar and tab bar. */
+  .assistant-window {
+    inset: 0;
+    z-index: 45;
+    width: auto;
+    height: auto;
+    border: none;
+    border-radius: 0;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .assistant-head .btn-icon {
+    width: 44px;
+    height: 44px;
+  }
+
+  .assistant-msg {
+    max-width: 90%;
+    font-size: 15px;
+  }
+
+  .assistant-chip {
+    padding: 9px 14px;
+    font-size: 14px;
+  }
+
+  .assistant-form .btn {
+    min-width: 44px;
   }
 }

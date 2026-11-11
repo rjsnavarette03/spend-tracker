@@ -1,5 +1,6 @@
 import { FormEvent, useState } from 'react';
 import type { Account } from '../../shared/types';
+import { isArchived } from '../accounts';
 import { api } from '../api';
 import { cleanError, fmtMoney, nowTimeHm, parseAmountToCents, todayStr } from '../format';
 import { BanknoteIcon } from './Icons';
@@ -22,7 +23,7 @@ export function PayModal({
   onSaved: () => void;
 }) {
   const sources = accounts.filter(
-    (a) => a.id !== account.id && (a.type === 'debit' || a.type === 'credit')
+    (a) => a.id !== account.id && (a.type === 'debit' || a.type === 'credit') && !isArchived(a)
   );
 
   const [sourceId, setSourceId] = useState<string>(sources[0] ? String(sources[0].id) : '');

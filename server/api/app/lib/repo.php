@@ -230,6 +230,7 @@ final class Repo
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
             [$uid, $amount, $type, $categoryId, $accountId, $date, $time, $note]
         );
+        self::restoreOnActivity($uid, $accountId);
         $row = DB::one(
             'SELECT t.id, t.amount_cents AS amountCents, t.type, t.category_id AS categoryId,
                     t.account_id AS accountId, t.date, t.time, t.note,
@@ -270,26 +271,28 @@ final class Repo
     // ---------- accounts ----------
 
     /**
-     * Live balance ledger per account:
+     * Live balance of account `a`:
      *   opening + income tx − expense tx − (outgoing transfers + fees) + incoming transfers
      * Positive = money you have; negative = money you owe (credit/loan).
-     *
-     * @return array<int, array<string, mixed>>
      */
+    private const BALANCE_SQL =
+        "a.opening_balance_cents
+         + COALESCE((SELECT SUM(CASE WHEN t.type = 'income' THEN t.amount_cents ELSE -t.amount_cents END)
+                     FROM transactions t WHERE t.account_id = a.id), 0)
+         - COALESCE((SELECT SUM(tro.amount_cents + tro.fee_cents)
+                     FROM transfers tro WHERE tro.from_account_id = a.id), 0)
+         + COALESCE((SELECT SUM(tri.amount_cents)
+                     FROM transfers tri WHERE tri.to_account_id = a.id), 0)";
+
+    /** @return array<int, array<string, mixed>> */
     public static function listAccounts(int $uid): array
     {
         $rows = DB::all(
             "SELECT a.id, a.name, a.type, a.color, a.image,
                     a.due_day AS dueDay, a.due_day2 AS dueDay2,
                     a.opening_balance_cents AS openingBalanceCents,
-                    a.opening_balance_cents
-                    + COALESCE((SELECT SUM(CASE WHEN t.type = 'income' THEN t.amount_cents ELSE -t.amount_cents END)
-                                FROM transactions t WHERE t.account_id = a.id), 0)
-                    - COALESCE((SELECT SUM(tro.amount_cents + tro.fee_cents)
-                                FROM transfers tro WHERE tro.from_account_id = a.id), 0)
-                    + COALESCE((SELECT SUM(tri.amount_cents)
-                                FROM transfers tri WHERE tri.to_account_id = a.id), 0)
-                      AS balanceCents,
+                    " . self::BALANCE_SQL . " AS balanceCents,
+                    a.archived_at AS archivedAt,
                     (SELECT COUNT(*) FROM transactions tc WHERE tc.account_id = a.id) AS txCount,
                     (SELECT COUNT(*) FROM transfers trc
                      WHERE trc.from_account_id = a.id OR trc.to_account_id = a.id) AS transferCount
@@ -308,6 +311,7 @@ final class Repo
             'dueDay2' => $r['dueDay2'] === null ? null : (int)$r['dueDay2'],
             'openingBalanceCents' => (int)$r['openingBalanceCents'],
             'balanceCents' => (int)$r['balanceCents'],
+            'archivedAt' => $r['archivedAt'] === null ? null : (string)$r['archivedAt'],
             'txCount' => (int)$r['txCount'],
             'transferCount' => (int)$r['transferCount'],
         ], $rows);
@@ -372,6 +376,7 @@ final class Repo
             'dueDay2' => $dueDay2,
             'openingBalanceCents' => $opening,
             'balanceCents' => $opening,
+            'archivedAt' => null,
             'txCount' => 0,
             'transferCount' => 0,
         ];
@@ -406,6 +411,91 @@ final class Repo
         }
     }
 
+    /**
+     * Archive a settled account: hidden from the account lists and pickers,
+     * its history untouched (unlike delete). Only at a balance of exactly 0,
+     * so no money or debt is ever hidden, and not while a subscription still
+     * charges it. Schedule items planning payments into it (a loan's
+     * installments, a savings goal, a payday's deposit) are paused, or the
+     * planner and reminders would keep showing a settled loan as due.
+     * Archiving an archived account changes nothing.
+     *
+     * @return array{archivedAt: string, pausedItems: list<string>}
+     */
+    public static function archiveAccount(int $uid, int $id): array
+    {
+        $a = DB::one(
+            'SELECT a.archived_at AS archivedAt, ' . self::BALANCE_SQL . ' AS balanceCents
+             FROM accounts a WHERE a.id = ? AND a.user_id = ?',
+            [$id, $uid]
+        );
+        if ($a === null) {
+            throw new ApiError('Account not found', 404);
+        }
+        if ($a['archivedAt'] !== null) {
+            return ['archivedAt' => (string)$a['archivedAt'], 'pausedItems' => []];
+        }
+        if ((int)$a['balanceCents'] !== 0) {
+            throw new ApiError('Only a settled account can be archived — this one still has a balance.', 422);
+        }
+        $subs = array_column(
+            DB::all('SELECT name FROM subscriptions WHERE user_id = ? AND account_id = ? AND active = 1 ORDER BY name', [$uid, $id]),
+            'name'
+        );
+        if ($subs !== []) {
+            throw new ApiError(
+                implode(', ', $subs) . (count($subs) === 1 ? ' still charges' : ' still charge')
+                    . ' this account. Move or pause it in Subscriptions first.',
+                422
+            );
+        }
+
+        $archivedAt = date('Y-m-d H:i:s');
+        $pdo = DB::pdo();
+        $pdo->beginTransaction();
+        try {
+            $paused = array_column(
+                DB::all('SELECT name FROM schedule_items WHERE user_id = ? AND account_id = ? AND active = 1 ORDER BY name', [$uid, $id]),
+                'name'
+            );
+            DB::exec('UPDATE schedule_items SET active = 0 WHERE user_id = ? AND account_id = ? AND active = 1', [$uid, $id]);
+            DB::exec('UPDATE accounts SET archived_at = ? WHERE id = ? AND user_id = ?', [$archivedAt, $id, $uid]);
+            $pdo->commit();
+        } catch (Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+        return ['archivedAt' => $archivedAt, 'pausedItems' => array_map('strval', $paused)];
+    }
+
+    /** Back on the account lists and pickers. Paused schedule items stay paused. */
+    public static function restoreAccount(int $uid, int $id): void
+    {
+        if (DB::one('SELECT id FROM accounts WHERE id = ? AND user_id = ?', [$id, $uid]) === null) {
+            throw new ApiError('Account not found', 404);
+        }
+        DB::exec('UPDATE accounts SET archived_at = NULL WHERE id = ? AND user_id = ?', [$id, $uid]);
+    }
+
+    /**
+     * New activity on an archived account restores it — borrowing from a
+     * settled loan again, say. Called after every new transaction or transfer
+     * (Schedule payments and subscription charges included); edits of old rows
+     * don't restore.
+     */
+    private static function restoreOnActivity(int $uid, ?int ...$accountIds): void
+    {
+        $ids = array_values(array_filter($accountIds, static fn(?int $id): bool => $id !== null));
+        if ($ids === []) {
+            return;
+        }
+        DB::exec(
+            'UPDATE accounts SET archived_at = NULL
+             WHERE user_id = ? AND archived_at IS NOT NULL AND id IN (' . implode(', ', array_fill(0, count($ids), '?')) . ')',
+            [$uid, ...$ids]
+        );
+    }
+
     /** Verifies ownership; returns the account type for callers that restrict by type. */
     private static function assertAccountOwned(int $uid, int $accountId): string
     {
@@ -420,17 +510,27 @@ final class Repo
 
     /**
      * @param array<string, mixed> $data
-     * @return array{0: int, 1: int, 2: int, 3: int, 4: string, 5: string} from, to, amount, fee, date, note
+     * @return array{0: int, 1: ?int, 2: int, 3: int, 4: string, 5: ?string, 6: string} from, to, amount, fee, date, time, note
      */
     private static function cleanTransferInput(int $uid, array $data): array
     {
         $from = Validate::intId($data['fromAccountId'] ?? null);
-        $to = Validate::intId($data['toAccountId'] ?? null);
-        if ($from === $to) {
+        // A borrow can skip the deposit account ("just track what you owe"):
+        // stored with a NULL destination so it still appears in history and
+        // grows the debt (amount + fee leave the loan, land nowhere). Only
+        // loan sources may omit the destination.
+        $to = Validate::accountIdOrNull($data['toAccountId'] ?? null);
+        if ($to !== null && $from === $to) {
             throw new ApiError('Choose two different accounts', 422);
         }
-        self::assertAccountOwned($uid, $from);
-        self::assertAccountOwned($uid, $to);
+        $fromType = self::assertAccountOwned($uid, $from);
+        if ($to === null) {
+            if ($fromType !== 'loan') {
+                throw new ApiError('Choose a destination account', 422);
+            }
+        } else {
+            self::assertAccountOwned($uid, $to);
+        }
         $amount = Validate::amountCents($data['amountCents'] ?? null);
         $fee = Validate::feeCents($data['feeCents'] ?? null);
         $date = Validate::date($data['date'] ?? null);
@@ -499,6 +599,7 @@ final class Repo
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
             [$uid, $from, $to, $amount, $fee, $date, $time, $note]
         );
+        self::restoreOnActivity($uid, $from, $to);
         $row = DB::one(
             'SELECT tr.id, tr.from_account_id AS fromAccountId, tr.to_account_id AS toAccountId,
                     tr.amount_cents AS amountCents, tr.fee_cents AS feeCents, tr.date, tr.time, tr.note,
@@ -989,6 +1090,7 @@ final class Repo
                             (string)$s['name'] . ' (subscription)',
                         ]
                     );
+                    self::restoreOnActivity($uid, (int)$s['account_id']);
                     $pdo->commit();
                 } catch (Throwable) {
                     if ($pdo->inTransaction()) {
@@ -1025,5 +1127,521 @@ final class Repo
         $anchor = $billDay ?? $d;
         $lastDay = (int)date('t', (int)mktime(12, 0, 0, $m, 1, $y));
         return sprintf('%04d-%02d-%02d', $y, $m, min($anchor, $lastDay));
+    }
+
+    // ---------- payment schedule ----------
+
+    private const SCHEDULE_SELECT =
+        'SELECT id, name, kind, account_id AS accountId, subscription_id AS subscriptionId,
+                category_id AS categoryId, amount_mode AS amountMode, amount_cents AS amountCents,
+                match_keyword AS matchKeyword, due_day AS dueDay, week_day AS weekDay,
+                funded_by AS fundedBy, weekend_shift AS weekendShift, start_date AS startDate,
+                end_date AS endDate, goal_cents AS goalCents, goal_milestones AS goalMilestones,
+                pay_from_account_id AS payFromAccountId, active
+         FROM schedule_items';
+
+    // Amount and paid date come from the linked ledger row, never a copy.
+    private const SCHEDULE_PAYMENT_SELECT =
+        'SELECT sp.id, sp.item_id AS itemId, sp.due_date AS dueDate,
+                sp.transfer_id AS transferId, sp.transaction_id AS transactionId,
+                COALESCE(tr.amount_cents, t.amount_cents) AS amountCents,
+                COALESCE(tr.date, t.date) AS paidDate
+         FROM schedule_payments sp
+         LEFT JOIN transfers tr ON tr.id = sp.transfer_id
+         LEFT JOIN transactions t ON t.id = sp.transaction_id';
+
+    /**
+     * Everything the Schedule page needs in one round trip:
+     *   items    — paydays + planned outflows (avg3 bills carry their estimate)
+     *   payments — explicit occurrence -> ledger links (last ~13 months)
+     *   activity — recent ledger rows that can settle an occurrence even when
+     *              they weren't paid through the Schedule: transfers INTO
+     *              loan/card/savings item accounts, income into payday deposit
+     *              accounts, expenses in bill categories. Linked rows appear
+     *              here too; the client skips them by id so nothing counts twice.
+     * @return array<string, mixed>
+     */
+    public static function getSchedule(int $uid): array
+    {
+        $items = array_map(
+            static fn(array $r): array => self::castScheduleItem($uid, $r),
+            DB::all(self::SCHEDULE_SELECT . ' WHERE user_id = ? ORDER BY id', [$uid])
+        );
+        $payments = array_map(
+            [self::class, 'castSchedulePayment'],
+            DB::all(
+                self::SCHEDULE_PAYMENT_SELECT . ' WHERE sp.user_id = ? AND sp.due_date >= ? ORDER BY sp.due_date, sp.id',
+                [$uid, date('Y-m-d', strtotime('-400 days'))]
+            )
+        );
+
+        $since = date('Y-m-d', strtotime('-120 days'));
+        $transfers = DB::all(
+            "SELECT tr.id, tr.to_account_id AS accountId, tr.date, tr.amount_cents AS amountCents, tr.note
+             FROM transfers tr
+             WHERE tr.user_id = ? AND tr.date >= ? AND tr.to_account_id IN (
+                 SELECT si.account_id FROM schedule_items si
+                 WHERE si.user_id = ? AND si.kind IN ('loan', 'card', 'savings') AND si.account_id IS NOT NULL)
+             ORDER BY tr.date, tr.id
+             LIMIT 1000",
+            [$uid, $since, $uid]
+        );
+        $txs = DB::all(
+            "SELECT t.id, t.type, t.account_id AS accountId, t.category_id AS categoryId,
+                    t.date, t.amount_cents AS amountCents, t.note
+             FROM transactions t
+             WHERE t.user_id = ? AND t.date >= ? AND (
+                 (t.type = 'income' AND t.account_id IN (
+                     SELECT si.account_id FROM schedule_items si
+                     WHERE si.user_id = ? AND si.kind = 'income' AND si.account_id IS NOT NULL))
+                 OR (t.type = 'expense' AND t.category_id IN (
+                     SELECT si.category_id FROM schedule_items si
+                     WHERE si.user_id = ? AND si.kind = 'bill' AND si.category_id IS NOT NULL)))
+             ORDER BY t.date, t.id
+             LIMIT 1000",
+            [$uid, $since, $uid, $uid]
+        );
+        $activity = [];
+        foreach ($transfers as $r) {
+            $activity[] = [
+                'source' => 'transfer',
+                'id' => (int)$r['id'],
+                'type' => 'transfer',
+                'accountId' => (int)$r['accountId'],
+                'categoryId' => null,
+                'date' => (string)$r['date'],
+                'amountCents' => (int)$r['amountCents'],
+                'note' => (string)$r['note'],
+            ];
+        }
+        foreach ($txs as $r) {
+            $activity[] = [
+                'source' => 'transaction',
+                'id' => (int)$r['id'],
+                'type' => (string)$r['type'],
+                'accountId' => $r['accountId'] === null ? null : (int)$r['accountId'],
+                'categoryId' => $r['categoryId'] === null ? null : (int)$r['categoryId'],
+                'date' => (string)$r['date'],
+                'amountCents' => (int)$r['amountCents'],
+                'note' => (string)$r['note'],
+            ];
+        }
+        return ['items' => $items, 'payments' => $payments, 'activity' => $activity];
+    }
+
+    /**
+     * @param array<string, mixed> $r
+     * @return array<string, mixed>
+     */
+    private static function castScheduleItem(int $uid, array $r): array
+    {
+        $item = [
+            'id' => (int)$r['id'],
+            'name' => (string)$r['name'],
+            'kind' => (string)$r['kind'],
+            'accountId' => $r['accountId'] === null ? null : (int)$r['accountId'],
+            'subscriptionId' => $r['subscriptionId'] === null ? null : (int)$r['subscriptionId'],
+            'categoryId' => $r['categoryId'] === null ? null : (int)$r['categoryId'],
+            'amountMode' => (string)$r['amountMode'],
+            'amountCents' => (int)$r['amountCents'],
+            'matchKeyword' => $r['matchKeyword'] === null ? null : (string)$r['matchKeyword'],
+            'dueDay' => $r['dueDay'] === null ? null : (int)$r['dueDay'],
+            'weekDay' => $r['weekDay'] === null ? null : (int)$r['weekDay'],
+            'fundedBy' => $r['fundedBy'] === null ? null : (int)$r['fundedBy'],
+            'weekendShift' => (string)$r['weekendShift'],
+            'startDate' => (string)$r['startDate'],
+            'endDate' => $r['endDate'] === null ? null : (string)$r['endDate'],
+            'goalCents' => $r['goalCents'] === null ? null : (int)$r['goalCents'],
+            'goalMilestones' => $r['goalMilestones'] === null || $r['goalMilestones'] === ''
+                ? []
+                : array_map('intval', explode(',', (string)$r['goalMilestones'])),
+            'payFromAccountId' => $r['payFromAccountId'] === null ? null : (int)$r['payFromAccountId'],
+            'active' => (int)$r['active'] === 1,
+            'estimateCents' => null,
+            'estimateFrom' => null,
+            'estimateTo' => null,
+        ];
+        if ($item['kind'] === 'bill' && $item['amountMode'] === 'avg3' && $item['categoryId'] !== null) {
+            // Total over the 3 complete months ÷ 3, so a bill paid late (two
+            // in one month, none in the next) still averages correctly.
+            [$from, $to] = self::estimateWindow();
+            $sql = "SELECT COUNT(*) AS n, COALESCE(SUM(amount_cents), 0) AS total
+                    FROM transactions
+                    WHERE user_id = ? AND type = 'expense' AND category_id = ? AND date >= ? AND date <= ?";
+            $params = [$uid, $item['categoryId'], $from, $to];
+            if ($item['matchKeyword'] !== null) {
+                $sql .= " AND LOWER(note) LIKE ? ESCAPE '!'";
+                $params[] = '%' . str_replace(['!', '%', '_'], ['!!', '!%', '!_'], mb_strtolower($item['matchKeyword'])) . '%';
+            }
+            $row = DB::one($sql, $params);
+            $item['estimateFrom'] = $from;
+            $item['estimateTo'] = $to;
+            // null = no history yet (the client falls back to amountCents).
+            $item['estimateCents'] = $row !== null && (int)$row['n'] > 0 ? (int)round((int)$row['total'] / 3) : null;
+        }
+        return $item;
+    }
+
+    /**
+     * @param array<string, mixed> $r
+     * @return array<string, mixed>
+     */
+    private static function castSchedulePayment(array $r): array
+    {
+        return [
+            'id' => (int)$r['id'],
+            'itemId' => (int)$r['itemId'],
+            'dueDate' => (string)$r['dueDate'],
+            'transferId' => $r['transferId'] === null ? null : (int)$r['transferId'],
+            'transactionId' => $r['transactionId'] === null ? null : (int)$r['transactionId'],
+            'amountCents' => (int)$r['amountCents'],
+            'paidDate' => (string)$r['paidDate'],
+        ];
+    }
+
+    /** @return array{0: string, 1: string} first..last day of the 3 complete months before this one */
+    private static function estimateWindow(): array
+    {
+        $y = (int)date('Y');
+        $m = (int)date('n');
+        return [
+            date('Y-m-d', (int)mktime(12, 0, 0, $m - 3, 1, $y)),
+            date('Y-m-d', (int)mktime(12, 0, 0, $m, 0, $y)), // day 0 = last day of last month
+        ];
+    }
+
+    private static function requiredDueDay(mixed $v, string $message): int
+    {
+        $day = Validate::dueDayOrNull($v);
+        if ($day === null) {
+            throw new ApiError($message, 422);
+        }
+        return $day;
+    }
+
+    /** A funding payday must be one of the user's own income items (null = automatic). */
+    private static function cleanFundedBy(int $uid, mixed $v): ?int
+    {
+        if ($v === null || $v === '') {
+            return null;
+        }
+        $id = Validate::intId($v);
+        if (DB::one("SELECT id FROM schedule_items WHERE id = ? AND user_id = ? AND kind = 'income'", [$id, $uid]) === null) {
+            throw new ApiError('Funding payday must be one of your paydays', 422);
+        }
+        return $id;
+    }
+
+    /**
+     * Validates an item for its kind and returns the full column set. Fields
+     * that don't apply to the kind are forced to their neutral value, so a
+     * stored row never carries settings it ignores.
+     *
+     * @param array<string, mixed> $data
+     * @param array<string, mixed>|null $existing the row being updated (kind and subscription are immutable)
+     * @return array<string, mixed> column => value
+     */
+    private static function cleanScheduleInput(int $uid, string $kind, array $data, ?array $existing): array
+    {
+        $startDate = Validate::dateOrNull($data['startDate'] ?? null)
+            ?? ($existing !== null ? (string)$existing['start_date'] : date('Y-m-d'));
+        $row = [
+            'name' => '',
+            'account_id' => null,
+            'subscription_id' => null,
+            'category_id' => null,
+            'amount_mode' => 'fixed',
+            'amount_cents' => 0,
+            'match_keyword' => null,
+            'due_day' => null,
+            'week_day' => null,
+            'funded_by' => null,
+            'weekend_shift' => 'none',
+            'start_date' => $startDate,
+            'end_date' => Validate::dateOrNull($data['endDate'] ?? null),
+            'goal_cents' => null,
+            'goal_milestones' => null,
+            'pay_from_account_id' => null,
+            'active' => (!array_key_exists('active', $data) || (bool)$data['active']) ? 1 : 0,
+        ];
+        if ($row['end_date'] !== null && $row['end_date'] < $startDate) {
+            throw new ApiError('End date must be on or after the start date', 422);
+        }
+
+        // Subscriptions keep their own amount, dates and account; the schedule
+        // row only says which payday funds them.
+        if ($kind === 'subscription') {
+            $subId = $existing !== null
+                ? (int)$existing['subscription_id']
+                : Validate::intId($data['subscriptionId'] ?? null);
+            $sub = DB::one('SELECT name FROM subscriptions WHERE id = ? AND user_id = ?', [$subId, $uid]);
+            if ($sub === null) {
+                throw new ApiError('Invalid subscription', 422);
+            }
+            $row['name'] = (string)$sub['name'];
+            $row['subscription_id'] = $subId;
+            $row['end_date'] = null;
+            $row['funded_by'] = self::cleanFundedBy($uid, $data['fundedBy'] ?? null);
+            return $row;
+        }
+
+        $row['name'] = Validate::name($data['name'] ?? null);
+        $accountId = Validate::accountIdOrNull($data['accountId'] ?? null);
+        $categoryId = Validate::categoryIdOrNull($data['categoryId'] ?? null);
+
+        if ($kind === 'income') {
+            $row['amount_cents'] = Validate::amountCents($data['amountCents'] ?? null);
+            $row['due_day'] = self::requiredDueDay($data['dueDay'] ?? null, 'Choose the payday (day of the month)');
+            $row['weekend_shift'] = Validate::weekendShift($data['weekendShift'] ?? 'before');
+            if ($accountId !== null && self::assertAccountOwned($uid, $accountId) !== 'debit') {
+                throw new ApiError('Salary must land in a debit account', 422);
+            }
+            if ($categoryId !== null) {
+                self::assertCategoryOwned($uid, $categoryId, 'income');
+            }
+            $row['account_id'] = $accountId;
+            $row['category_id'] = $categoryId;
+            return $row;
+        }
+
+        // Every outflow: an optional default source account, and the payday
+        // that funds it (weekly allowances are funded by whichever payday
+        // precedes each week, so they never pin one).
+        $payFrom = Validate::accountIdOrNull($data['payFromAccountId'] ?? null);
+        if ($payFrom !== null && self::assertAccountOwned($uid, $payFrom) === 'loan') {
+            throw new ApiError('Pay from a debit or credit account', 422);
+        }
+        $row['pay_from_account_id'] = $payFrom;
+        $row['funded_by'] = $kind === 'allowance' ? null : self::cleanFundedBy($uid, $data['fundedBy'] ?? null);
+
+        switch ($kind) {
+            case 'loan':
+            case 'card':
+                // Due days live on the account itself (one source of truth).
+                $want = $kind === 'loan' ? 'loan' : 'credit';
+                if ($accountId === null || self::assertAccountOwned($uid, $accountId) !== $want) {
+                    throw new ApiError($kind === 'loan' ? 'Choose a loan account' : 'Choose a credit card account', 422);
+                }
+                $row['account_id'] = $accountId;
+                $row['amount_cents'] = Validate::amountCents($data['amountCents'] ?? null);
+                break;
+            case 'bill':
+                if ($categoryId === null) {
+                    throw new ApiError('Choose an expense category for this bill', 422);
+                }
+                self::assertCategoryOwned($uid, $categoryId, 'expense');
+                $row['category_id'] = $categoryId;
+                $row['due_day'] = self::requiredDueDay($data['dueDay'] ?? null, 'Choose the due day');
+                $row['amount_mode'] = Validate::scheduleAmountMode($data['amountMode'] ?? 'fixed');
+                $avg3 = $row['amount_mode'] === 'avg3';
+                // An avg3 bill may have no fallback amount (0 until there's history).
+                $row['amount_cents'] = Validate::amountCents($data['amountCents'] ?? ($avg3 ? 0 : null), $avg3);
+                // Narrows which expenses in the category belong to this bill —
+                // for the avg3 estimate, and (client-side) for recognizing a
+                // payment made outside the Schedule, so a fixed Water bill
+                // isn't "paid" by an electricity expense in the same category.
+                $row['match_keyword'] = Validate::keywordOrNull($data['matchKeyword'] ?? null);
+                break;
+            case 'allowance':
+                $row['week_day'] = Validate::weekDay($data['weekDay'] ?? null);
+                $row['amount_cents'] = Validate::amountCents($data['amountCents'] ?? null);
+                if ($categoryId !== null) {
+                    self::assertCategoryOwned($uid, $categoryId, 'expense');
+                }
+                $row['category_id'] = $categoryId;
+                break;
+            case 'savings':
+                if ($accountId === null || self::assertAccountOwned($uid, $accountId) !== 'debit') {
+                    throw new ApiError('Choose the debit account your savings go into', 422);
+                }
+                if ($payFrom === $accountId) {
+                    throw new ApiError('Pay from a different account than the savings account', 422);
+                }
+                $row['account_id'] = $accountId;
+                $row['due_day'] = self::requiredDueDay($data['dueDay'] ?? null, 'Choose the day you set money aside');
+                $row['amount_cents'] = Validate::amountCents($data['amountCents'] ?? null);
+                $goal = $data['goalCents'] ?? null;
+                $row['goal_cents'] = $goal === null || $goal === '' ? null : Validate::amountCents($goal);
+                // Checkpoints on the way to the goal; with no goal set, the
+                // largest milestone is the goal.
+                $milestones = Validate::milestones($data['goalMilestones'] ?? null);
+                if ($milestones !== []) {
+                    $top = $milestones[count($milestones) - 1];
+                    if ($row['goal_cents'] === null) {
+                        $row['goal_cents'] = $top;
+                    } elseif ($top > $row['goal_cents']) {
+                        throw new ApiError('Milestones can\'t be above the goal', 422);
+                    }
+                    $row['goal_milestones'] = implode(',', $milestones);
+                }
+                break;
+        }
+        return $row;
+    }
+
+    /** @return array<string, mixed> */
+    private static function scheduleItem(int $uid, int $id): array
+    {
+        $row = DB::one(self::SCHEDULE_SELECT . ' WHERE id = ? AND user_id = ?', [$id, $uid]);
+        if ($row === null) {
+            throw new ApiError('Schedule item not found', 404);
+        }
+        return self::castScheduleItem($uid, $row);
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return array<string, mixed>
+     */
+    public static function createScheduleItem(int $uid, array $data): array
+    {
+        $kind = Validate::scheduleKind($data['kind'] ?? null);
+        $row = self::cleanScheduleInput($uid, $kind, $data, null);
+        if (
+            $kind === 'subscription'
+            && DB::one('SELECT id FROM schedule_items WHERE subscription_id = ? AND user_id = ?', [$row['subscription_id'], $uid]) !== null
+        ) {
+            throw new ApiError('That subscription is already on your schedule', 409);
+        }
+        $cols = array_keys($row);
+        $id = DB::insert(
+            'INSERT INTO schedule_items (user_id, kind, ' . implode(', ', $cols) . ')
+             VALUES (?, ?, ' . implode(', ', array_fill(0, count($cols), '?')) . ')',
+            [$uid, $kind, ...array_values($row)]
+        );
+        return self::scheduleItem($uid, $id);
+    }
+
+    /**
+     * Kind is immutable (it decides how past payments were recorded), as is a
+     * subscription row's subscription.
+     * @param array<string, mixed> $data
+     */
+    public static function updateScheduleItem(int $uid, int $id, array $data): void
+    {
+        $existing = DB::one(
+            'SELECT kind, subscription_id, start_date FROM schedule_items WHERE id = ? AND user_id = ?',
+            [$id, $uid]
+        );
+        if ($existing === null) {
+            throw new ApiError('Schedule item not found', 404);
+        }
+        $row = self::cleanScheduleInput($uid, (string)$existing['kind'], $data, $existing);
+        $set = implode(', ', array_map(static fn(string $c): string => "$c = ?", array_keys($row)));
+        DB::exec(
+            "UPDATE schedule_items SET $set WHERE id = ? AND user_id = ?",
+            [...array_values($row), $id, $uid]
+        );
+    }
+
+    public static function deleteScheduleItem(int $uid, int $id): void
+    {
+        // Items this payday funded fall back to automatic funding. Payment
+        // links cascade away; the transfers/transactions they point to stay.
+        DB::exec('UPDATE schedule_items SET funded_by = NULL WHERE funded_by = ? AND user_id = ?', [$id, $uid]);
+        $count = DB::exec('DELETE FROM schedule_items WHERE id = ? AND user_id = ?', [$id, $uid]);
+        if ($count === 0) {
+            throw new ApiError('Schedule item not found', 404);
+        }
+    }
+
+    /**
+     * "Mark as paid": records the payment through the normal ledger paths
+     * (createTransfer / createTransaction, with all their validation) and
+     * links it to the occurrence, atomically. Any amount is accepted — less
+     * than due is a partial payment, more is an extra one.
+     *   loan / card / savings → transfer from the chosen account to the item's account
+     *   bill / allowance      → expense transaction in the item's category
+     *   income                → income transaction into the deposit account ("log actual")
+     * Subscriptions are refused: they're charged automatically.
+     *
+     * @param array<string, mixed> $data
+     * @return array<string, mixed>
+     */
+    public static function paySchedule(int $uid, array $data): array
+    {
+        $itemId = Validate::intId($data['itemId'] ?? null);
+        $item = DB::one(
+            'SELECT name, kind, account_id, category_id, pay_from_account_id FROM schedule_items WHERE id = ? AND user_id = ?',
+            [$itemId, $uid]
+        );
+        if ($item === null) {
+            throw new ApiError('Schedule item not found', 404);
+        }
+        $kind = (string)$item['kind'];
+        if ($kind === 'subscription') {
+            throw new ApiError('Subscriptions are charged automatically', 422);
+        }
+        $dueDate = Validate::date($data['dueDate'] ?? null);
+        $name = (string)$item['name'];
+        $itemAccount = $item['account_id'] === null ? null : (int)$item['account_id'];
+        $categoryId = $item['category_id'] === null ? null : (int)$item['category_id'];
+        $usesTransfer = in_array($kind, ['loan', 'card', 'savings'], true);
+
+        // The cash side: where the money comes from (for income, where it lands).
+        $defaultAccount = $kind === 'income'
+            ? $itemAccount
+            : ($item['pay_from_account_id'] === null ? null : (int)$item['pay_from_account_id']);
+        $accountId = Validate::accountIdOrNull($data['accountId'] ?? null) ?? $defaultAccount;
+        if ($accountId === null) {
+            throw new ApiError($kind === 'income' ? 'Choose the account the salary landed in' : 'Choose an account to pay from', 422);
+        }
+        $accountType = self::assertAccountOwned($uid, $accountId);
+        if ($kind === 'income' && $accountType !== 'debit') {
+            throw new ApiError('Salary must land in a debit account', 422);
+        }
+        if ($usesTransfer) {
+            if ($itemAccount === null) {
+                throw new ApiError("This item's account was deleted", 422);
+            }
+            if ($accountType === 'loan') {
+                throw new ApiError('Pay from a debit or credit account', 422);
+            }
+        }
+        $fee = Validate::feeCents($data['feeCents'] ?? null);
+        if ($fee > 0 && !$usesTransfer) {
+            throw new ApiError('Only payments to an account can carry a fee', 422);
+        }
+        $note = trim(Validate::note($data['note'] ?? ''));
+        $base = [
+            'amountCents' => $data['amountCents'] ?? null,
+            'date' => $data['date'] ?? null,
+            'time' => $data['time'] ?? null,
+        ];
+
+        $pdo = DB::pdo();
+        $pdo->beginTransaction();
+        try {
+            $transfer = null;
+            $transaction = null;
+            if ($usesTransfer) {
+                $transfer = self::createTransfer($uid, $base + [
+                    'fromAccountId' => $accountId,
+                    'toAccountId' => $itemAccount,
+                    'feeCents' => $fee,
+                    'note' => $note !== '' ? $note : ($kind === 'savings' ? "Savings: $name" : "Payment to $name"),
+                ]);
+            } else {
+                $transaction = self::createTransaction($uid, $base + [
+                    'type' => $kind === 'income' ? 'income' : 'expense',
+                    'categoryId' => $categoryId,
+                    'accountId' => $accountId,
+                    'note' => $note !== '' ? $note : $name,
+                ]);
+            }
+            $linkId = DB::insert(
+                'INSERT INTO schedule_payments (user_id, item_id, due_date, transfer_id, transaction_id) VALUES (?, ?, ?, ?, ?)',
+                [$uid, $itemId, $dueDate, $transfer['id'] ?? null, $transaction['id'] ?? null]
+            );
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+        $link = DB::one(self::SCHEDULE_PAYMENT_SELECT . ' WHERE sp.id = ? AND sp.user_id = ?', [$linkId, $uid]);
+        assert($link !== null);
+        return ['payment' => self::castSchedulePayment($link), 'transfer' => $transfer, 'transaction' => $transaction];
     }
 }

@@ -4,6 +4,8 @@ import type {
   AuthResponse,
   BudgetCadence,
   MeResponse,
+  ScheduleItemInput,
+  SchedulePayInput,
   SubscriptionInput,
   TransferInput,
   TxFilter,
@@ -146,6 +148,11 @@ export const api: Api = {
       applyCurrency(r.currency);
       return r.currency;
     },
+    setReminders: (enabled, timezone) =>
+      http<{ ok: boolean; reminderEmails: boolean; reminderTimezone: string | null }>('POST', '/auth/reminders', {
+        enabled,
+        timezone,
+      }),
     deleteAccount: async (currentPassword) => {
       await http<{ ok: boolean }>('POST', '/auth/delete-account', { currentPassword });
       setCsrf(''); // the session died with the account
@@ -182,6 +189,10 @@ export const api: Api = {
       }
     ) => http('PUT', `/accounts/${id}`, data),
     remove: (id: number) => http('DELETE', `/accounts/${id}`),
+    archive: (id: number) => http('POST', `/accounts/${id}/archive`),
+    restore: async (id: number) => {
+      await http<{ ok: boolean }>('POST', `/accounts/${id}/restore`);
+    },
   },
   transfers: {
     list: (month?: string) => http('GET', `/transfers${qs({ month })}`),
@@ -218,6 +229,18 @@ export const api: Api = {
     update: (id: number, data: SubscriptionInput) => http('PUT', `/subscriptions/${id}`, data),
     remove: (id: number) => http('DELETE', `/subscriptions/${id}`),
   },
+  schedule: {
+    get: () => http('GET', '/schedule'),
+    createItem: (data: ScheduleItemInput) => http('POST', '/schedule/items', data),
+    updateItem: (id: number, data: ScheduleItemInput) => http('PUT', `/schedule/items/${id}`, data),
+    removeItem: (id: number) => http('DELETE', `/schedule/items/${id}`),
+    pay: (data: SchedulePayInput) => http('POST', '/schedule/pay', data),
+  },
+  reminders: {
+    unsubscribe: async (token) => {
+      await http<{ ok: boolean }>('POST', '/reminders/unsubscribe', { token });
+    },
+  },
   reports: {
     summary: (from: string, to: string) => http('GET', `/reports/summary${qs({ from, to })}`),
     trend: (endMonth: string, count: number) =>
@@ -225,5 +248,9 @@ export const api: Api = {
     breakdown: (from: string, to: string, type: TxType) =>
       http('GET', `/reports/breakdown${qs({ from, to, type })}`),
     years: () => http('GET', '/reports/years'),
+  },
+  assistant: {
+    status: () => http('GET', '/assistant'),
+    chat: (messages) => http('POST', '/assistant/chat', { messages }),
   },
 };

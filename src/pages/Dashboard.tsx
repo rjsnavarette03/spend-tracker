@@ -8,6 +8,7 @@ import type {
   Transaction,
   Transfer,
 } from '../../shared/types';
+import { isArchived } from '../accounts';
 import { api } from '../api';
 import { toast } from '../components/feedback';
 import { DonutChart } from '../components/DonutChart';
@@ -103,7 +104,7 @@ export function Dashboard({
   const { summary, trend, breakdown, budgets, recent } = data;
   const net = summary.incomeCents - summary.expenseCents;
   // Transfers move money between debit accounts, so two are needed.
-  const debitCount = accounts.filter((a) => a.type === 'debit').length;
+  const debitCount = accounts.filter((a) => a.type === 'debit' && !isArchived(a)).length;
   // Budgets are recurring rules at mixed cadences, so a single "% used" across
   // all of them would be apples-to-oranges. Track how many are within limit
   // (each compared against its own cadence's current period) instead.
@@ -122,6 +123,9 @@ export function Dashboard({
     if (accountType(tr.fromAccountId) === 'loan') return 'Borrowed';
     return 'Transfer';
   };
+  // A borrow may have no destination ("just track what you owe").
+  const toLabel = (tr: Transfer) =>
+    tr.toName ?? (transferBadge(tr) === 'Borrowed' ? 'Not deposited' : 'Deleted account');
 
   return (
     <div>
@@ -270,7 +274,7 @@ export function Dashboard({
                       <td>
                         <span
                           className="cat-chip"
-                          title={`${r.tr.fromName ?? 'Deleted account'} → ${r.tr.toName ?? 'Deleted account'}`}
+                          title={`${r.tr.fromName ?? 'Deleted account'} → ${toLabel(r.tr)}`}
                         >
                           <TransferIcon size={13} />
                           <span>{transferBadge(r.tr)}</span>
@@ -279,22 +283,23 @@ export function Dashboard({
                       {/* Glance list: fall back to the route when there's no note. */}
                       <td className="note-cell">
                         {r.tr.note ||
-                          `${r.tr.fromName ?? 'Deleted account'} → ${r.tr.toName ?? 'Deleted account'}`}
+                          `${r.tr.fromName ?? 'Deleted account'} → ${toLabel(r.tr)}`}
                       </td>
                       {/* Cash perspective: a Payment drains spendable money (red −),
-                          a Borrow adds to it (green +); a plain move stays neutral. */}
+                          a deposited Borrow adds to it (green +); a plain move —
+                          or a borrow that landed nowhere — stays neutral. */}
                       <td
                         className={`num ${
                           transferBadge(r.tr) === 'Payment'
                             ? 'amount-expense'
-                            : transferBadge(r.tr) === 'Borrowed'
+                            : transferBadge(r.tr) === 'Borrowed' && r.tr.toAccountId !== null
                               ? 'amount-income'
                               : ''
                         }`}
                       >
                         {transferBadge(r.tr) === 'Payment'
                           ? '−'
-                          : transferBadge(r.tr) === 'Borrowed'
+                          : transferBadge(r.tr) === 'Borrowed' && r.tr.toAccountId !== null
                             ? '+'
                             : ''}
                         {fmtMoney(r.tr.amountCents)}

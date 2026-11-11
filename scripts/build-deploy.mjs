@@ -4,6 +4,7 @@
 //     .htaccess                         <- rewrites + security headers
 //     api/index.php                     <- API front controller
 //     api/app/{lib,schema,.htaccess}    <- application internals (web-blocked)
+//     api/app/cron/                     <- command-line jobs (hourly reminder emails)
 //     router.php                        <- local `php -S` testing only
 // Run `npm run build` first.
 import fs from 'node:fs';
@@ -39,6 +40,7 @@ for (const f of fs.readdirSync(path.join(server, 'api', 'app', 'lib'))) {
     path.join(deploy, 'api', 'app', 'lib', f)
   );
 }
+fs.cpSync(path.join(server, 'api', 'app', 'cron'), path.join(deploy, 'api', 'app', 'cron'), { recursive: true });
 fs.copyFileSync(
   path.join(server, 'api', 'app', 'config.sample.php'),
   path.join(deploy, 'api', 'app', 'config.sample.php')

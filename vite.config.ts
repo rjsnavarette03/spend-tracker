@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -13,6 +14,11 @@ export default defineConfig({
         manualChunks: { vendor: ['react', 'react-dom', 'react-router-dom'] },
       },
     },
+  },
+  // Unit tests for the pure client logic (npm test). The API suite in test/
+  // is separate — it needs a running server (npm run test:api).
+  test: {
+    include: ['src/**/*.test.ts'],
   },
   server: {
     port: 5174,

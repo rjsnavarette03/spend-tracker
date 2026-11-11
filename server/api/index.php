@@ -17,6 +17,9 @@ require __DIR__ . '/app/lib/validate.php';
 require __DIR__ . '/app/lib/mailer.php';
 require __DIR__ . '/app/lib/auth.php';
 require __DIR__ . '/app/lib/repo.php';
+require __DIR__ . '/app/lib/reminders.php';
+require __DIR__ . '/app/lib/reminder_email.php';
+require __DIR__ . '/app/lib/assistant.php';
 
 $configFile = __DIR__ . '/app/config.php';
 if (!is_file($configFile)) {
@@ -54,9 +57,16 @@ try {
     // reset. The code-entry `verify` and `resend-verification` are authenticated
     // (the user is signed in but unverified) and keep the normal CSRF check.
     $preAuth = $resource === 'auth' && in_array($sub, ['login', 'register', 'google', 'forgot', 'reset', 'verify-link'], true);
-    Http::originCheck($method, $preAuth);
-    if (!in_array($method, ['GET', 'HEAD', 'OPTIONS'], true) && !$preAuth) {
-        Http::csrfCheck();
+    // The reminder-email unsubscribe link is authorized by its token alone and
+    // can only turn reminders off, so it skips both checks: mail providers'
+    // one-click unsubscribe (RFC 8058) POSTs to it from their own servers,
+    // with no session and no Origin or Sec-Fetch-Site.
+    $tokenOnly = $resource === 'reminders' && $sub === 'unsubscribe';
+    if (!$tokenOnly) {
+        Http::originCheck($method, $preAuth);
+        if (!in_array($method, ['GET', 'HEAD', 'OPTIONS'], true) && !$preAuth) {
+            Http::csrfCheck();
+        }
     }
 
     $googleClientId = (string)($config['google_client_id'] ?? '');
@@ -70,6 +80,29 @@ try {
             $dbOk = false;
         }
         Http::json(['ok' => $dbOk, 'php' => PHP_VERSION, 'db' => $dbOk]);
+    }
+
+    // ---------- reminder emails: unsubscribe link ----------
+    if ($tokenOnly) {
+        $token = $_GET['token'] ?? null;
+        if ($method === 'GET') {
+            // A mail client without one-click support opens the link in a
+            // browser: hand over to the app's unsubscribe screen, which asks
+            // before turning anything off (link scanners only GET).
+            $token = is_string($token) && preg_match('/^[a-f0-9]{64}$/', $token) === 1 ? $token : '';
+            header('Location: /?unsubscribe=' . $token, true, 302);
+            exit;
+        }
+        if ($method === 'POST') {
+            // One-click POSTs carry the token in the link and a form body;
+            // the app's screen sends it as JSON instead.
+            if ($token === null) {
+                $token = Http::readJson()['token'] ?? null;
+            }
+            Auth::unsubscribeReminders($token);
+            Http::json(['ok' => true]);
+        }
+        throw new ApiError('Not found', 404);
     }
 
     // ---------- auth ----------
@@ -147,6 +180,13 @@ try {
             $currency = Auth::setCurrency($me, $b['currency'] ?? null);
             Http::json(['ok' => true, 'currency' => $currency]);
         }
+        if ($method === 'POST' && $sub === 'reminders') {
+            // Verified only: reminders go to the account's email address.
+            // CSRF-checked above.
+            $me = Auth::requireVerifiedUser();
+            $b = Http::readJson();
+            Http::json(['ok' => true] + Auth::setReminders($me, $b['enabled'] ?? null, $b['timezone'] ?? null));
+        }
         throw new ApiError('Not found', 404);
     }
 
@@ -184,8 +224,17 @@ try {
 
     // ---------- accounts ----------
     if ($resource === 'accounts') {
+        $action = $seg[2] ?? '';
         if ($method === 'GET' && $sub === '') {
             Http::json(Repo::listAccounts($uid));
+        }
+        // Archive a settled account / bring it back (history is never touched).
+        if ($method === 'POST' && $sub !== '' && $action === 'archive') {
+            Http::json(Repo::archiveAccount($uid, Validate::intId($sub)));
+        }
+        if ($method === 'POST' && $sub !== '' && $action === 'restore') {
+            Repo::restoreAccount($uid, Validate::intId($sub));
+            Http::json(['ok' => true]);
         }
         if ($method === 'POST' && $sub === '') {
             // Larger body cap: accounts may carry an inline image data URI.
@@ -222,6 +271,31 @@ try {
         if ($method === 'DELETE' && $sub !== '') {
             Repo::deleteSubscription($uid, Validate::intId($sub));
             Http::json(['ok' => true]);
+        }
+        throw new ApiError('Not found', 404);
+    }
+
+    // ---------- payment schedule ----------
+    if ($resource === 'schedule') {
+        $id = $seg[2] ?? '';
+        if ($method === 'GET' && $sub === '') {
+            Http::json(Repo::getSchedule($uid));
+        }
+        if ($sub === 'items') {
+            if ($method === 'POST' && $id === '') {
+                Http::json(Repo::createScheduleItem($uid, Http::readJson()), 201);
+            }
+            if ($method === 'PUT' && $id !== '') {
+                Repo::updateScheduleItem($uid, Validate::intId($id), Http::readJson());
+                Http::json(['ok' => true]);
+            }
+            if ($method === 'DELETE' && $id !== '') {
+                Repo::deleteScheduleItem($uid, Validate::intId($id));
+                Http::json(['ok' => true]);
+            }
+        }
+        if ($method === 'POST' && $sub === 'pay') {
+            Http::json(Repo::paySchedule($uid, Http::readJson()), 201);
         }
         throw new ApiError('Not found', 404);
     }
@@ -273,6 +347,18 @@ try {
             $b = Http::readJson();
             Repo::upsertBudget($uid, $b['categoryId'] ?? null, $b['cadence'] ?? null, $b['amountCents'] ?? null);
             Http::json(['ok' => true]);
+        }
+        throw new ApiError('Not found', 404);
+    }
+
+    // ---------- AI assistant (the dashboard's chat) ----------
+    if ($resource === 'assistant') {
+        if ($method === 'GET' && $sub === '') {
+            Http::json(Assistant::status($uid));
+        }
+        if ($method === 'POST' && $sub === 'chat') {
+            // The browser sends the recent conversation with each question.
+            Http::json(Assistant::chat($uid, Http::readJson(256 * 1024)['messages'] ?? null));
         }
         throw new ApiError('Not found', 404);
     }

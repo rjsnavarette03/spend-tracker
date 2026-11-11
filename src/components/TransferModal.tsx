@@ -1,5 +1,6 @@
 import { FormEvent, useState } from 'react';
 import type { Account, Transfer } from '../../shared/types';
+import { isArchived } from '../accounts';
 import { api } from '../api';
 import { centsToInput, cleanError, fmtMoney, nowTimeHm, parseAmountToCents, todayStr } from '../format';
 import { CheckIcon, TransferIcon } from './Icons';
@@ -41,7 +42,7 @@ export function TransferModal({
   const [saving, setSaving] = useState(false);
 
   // Transfers move money between spending (debit) accounts only.
-  const debitAccounts = accounts.filter((a) => a.type === 'debit');
+  const debitAccounts = accounts.filter((a) => a.type === 'debit' && !isArchived(a));
   // Options for a select: debit accounts, plus the currently-chosen account if
   // it's a legacy non-debit one, so editing an old transfer doesn't drop it.
   const optionsFor = (currentId: string) => {

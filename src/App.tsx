@@ -2,10 +2,13 @@ import { Suspense, useCallback, useEffect, useState } from 'react';
 import { NavLink, Outlet, useNavigate, useOutletContext } from 'react-router-dom';
 import type { Account, Category, User } from '../shared/types';
 import { api } from './api';
+import { AssistantWidget } from './components/AssistantWidget';
 import { ChunkBoundary } from './components/ChunkBoundary';
+import { ReminderBell, RemindersPanel, useReminders } from './components/Reminders';
 import { ThemeToggle } from './components/ThemeToggle';
 import {
   BankIcon,
+  CalendarIcon,
   ChevronsLeftIcon,
   DashboardIcon,
   ListIcon,
@@ -34,6 +37,9 @@ export interface AppContext {
   // Years that have transactions — drives the year picker (see PeriodPicker).
   availableYears: number[];
   onDataChanged: () => void;
+  // Bumped by every onDataChanged, so a page holding its own data (Schedule)
+  // can reload when something changed elsewhere — e.g. paid from the reminders.
+  dataVersion: number;
   // The signed-in user (kept fresh here) + re-sync — used by /settings.
   user: User;
   refreshUser: () => void;
@@ -44,13 +50,16 @@ export function useAppContext(): AppContext {
 }
 
 // shortLabel: fits the 6-tab mobile tab bar; the sidebar shows the full label.
-const NAV: Array<{ to: string; label: string; shortLabel?: string; icon: JSX.Element }> = [
+// tab: false keeps an entry out of that bar (sidebar only) — Categories is
+// rarely visited, so on mobile it's reached from Settings instead.
+const NAV: Array<{ to: string; label: string; shortLabel?: string; icon: JSX.Element; tab?: false }> = [
   { to: '/dashboard', label: 'Dashboard', icon: <DashboardIcon /> },
   { to: '/transactions', label: 'Transactions', icon: <ListIcon /> },
   { to: '/accounts', label: 'Accounts', icon: <BankIcon /> },
+  { to: '/schedule', label: 'Schedule', icon: <CalendarIcon /> },
   { to: '/subscriptions', label: 'Subscriptions', shortLabel: 'Subs', icon: <RepeatIcon /> },
   { to: '/budgets', label: 'Budgets', icon: <TargetIcon /> },
-  { to: '/categories', label: 'Categories', icon: <TagIcon /> },
+  { to: '/categories', label: 'Categories', icon: <TagIcon />, tab: false },
 ];
 
 const SIDEBAR_KEY = 'spendtracker-sidebar';
@@ -133,11 +142,16 @@ export default function AppLayout({ user, onLogout }: { user: User; onLogout: ()
     void refreshYears();
   }, [refreshCategories, refreshAccounts, refreshYears]);
 
+  const [dataVersion, setDataVersion] = useState(0);
   const onDataChanged = useCallback(() => {
     void refreshCategories();
     void refreshAccounts();
     void refreshYears();
+    setDataVersion((v) => v + 1);
   }, [refreshCategories, refreshAccounts, refreshYears]);
+
+  const reminders = useReminders(account.id, accounts, dataVersion);
+  const [remindersOpen, setRemindersOpen] = useState(false);
 
   const ctx: AppContext = {
     period,
@@ -148,6 +162,7 @@ export default function AppLayout({ user, onLogout }: { user: User; onLogout: ()
     categoriesLoaded,
     availableYears,
     onDataChanged,
+    dataVersion,
     user: account,
     refreshUser: refreshAccount,
   };
@@ -164,6 +179,7 @@ export default function AppLayout({ user, onLogout }: { user: User; onLogout: ()
           SpendTracker
         </div>
         <div className="mobile-topbar-actions">
+          <ReminderBell unseen={reminders.unseen} onClick={() => setRemindersOpen(true)} />
           <ThemeToggle />
           <button
             className="btn-icon"
@@ -220,6 +236,7 @@ export default function AppLayout({ user, onLogout }: { user: User; onLogout: ()
           <div className="user-line" title={account.email}>
             <span className="user-email">{account.name || account.email}</span>
             <div className="user-actions">
+              <ReminderBell unseen={reminders.unseen} onClick={() => setRemindersOpen(true)} />
               <ThemeToggle />
               <button className="btn-icon" onClick={() => navigate('/settings')} title="Settings">
                 <SettingsIcon />
@@ -248,9 +265,27 @@ export default function AppLayout({ user, onLogout }: { user: User; onLogout: ()
         </ChunkBoundary>
       </main>
 
+      {remindersOpen && (
+        <RemindersPanel
+          state={reminders}
+          accounts={accounts}
+          categories={categories}
+          onClose={() => setRemindersOpen(false)}
+          onSaved={onDataChanged}
+          onPlanner={() => {
+            setRemindersOpen(false);
+            navigate('/schedule');
+          }}
+        />
+      )}
+
+      {/* Floating AI chat, bottom right on every page (hidden when the
+          server has no AI configured). */}
+      <AssistantWidget userId={account.id} userName={account.name} />
+
       {/* Mobile-only bottom tab bar (hidden on desktop). */}
       <nav className="tabbar" aria-label="Primary">
-        {NAV.map((item) => (
+        {NAV.filter((item) => item.tab !== false).map((item) => (
           <NavLink
             key={item.to}
             to={item.to}

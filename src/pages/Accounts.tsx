@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Account, AccountType, Transfer } from '../../shared/types';
+import { archivedOnLabel, isArchived } from '../accounts';
 import { api } from '../api';
 import { confirm, toast } from '../components/feedback';
 import { AccountEditModal } from '../components/AccountEditModal';
@@ -175,10 +176,14 @@ export function Accounts({
     }
   };
 
+  // Archived (settled) accounts leave the type sections for their own panel.
+  const active = accounts.filter((a) => !isArchived(a));
+  const archived = sortAccounts(accounts.filter(isArchived), 'name-asc');
+
   // Net worth by balance sign: positive balances are assets, negative are
   // liabilities (debts). Net worth = assets − liabilities = sum of balances.
   // Transfers move money between debit accounts only.
-  const debitCount = accounts.filter((a) => a.type === 'debit').length;
+  const debitCount = active.filter((a) => a.type === 'debit').length;
   const assets = accounts.filter((a) => a.balanceCents > 0).reduce((s, a) => s + a.balanceCents, 0);
   const liabilities = accounts
     .filter((a) => a.balanceCents < 0)
@@ -248,7 +253,7 @@ export function Accounts({
 
           <div className="accounts-grid">
             {SECTIONS.map(({ type, title, hint }) => {
-            const items = sortAccounts(accounts.filter((a) => a.type === type), sorts[type]);
+            const items = sortAccounts(active.filter((a) => a.type === type), sorts[type]);
             if (items.length === 0) return null;
             const subtotal = items.reduce((s, a) => s + a.balanceCents, 0);
             return (
@@ -342,6 +347,51 @@ export function Accounts({
             );
           })}
           </div>
+
+          {/* Settled accounts put away with their history — collapsed by default. */}
+          {archived.length > 0 && (
+            <details className="panel mt-panel archived-panel">
+              <summary>
+                <span>
+                  Archived ({archived.length})
+                  <span className="section-hint">Settled accounts, history kept</span>
+                </span>
+              </summary>
+              <table className="table">
+                <tbody>
+                  {archived.map((a) => (
+                    <tr
+                      key={a.id}
+                      className="row-link"
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`View ${a.name}`}
+                      onClick={() => navigate(`/accounts/${a.id}`)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          navigate(`/accounts/${a.id}`);
+                        }
+                      }}
+                    >
+                      <td>
+                        <span className="cat-chip">
+                          {a.image ? (
+                            <img className="acct-avatar" src={a.image} alt="" />
+                          ) : (
+                            <span className="color-dot" style={{ background: a.color }} />
+                          )}
+                          <span>{a.name}</span>
+                        </span>
+                        <div className="archived-type">{SECTIONS.find((s) => s.type === a.type)?.title}</div>
+                      </td>
+                      <td className="num archived-on">Archived {archivedOnLabel(a)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </details>
+          )}
         </>
       )}
 
@@ -410,7 +460,13 @@ export function Accounts({
                       <span className="transfer-arrow">→</span>
                       <span className="cat-chip">
                         <span className="color-dot" style={{ background: t.toColor ?? '#64748b' }} />
-                        <span>{t.toName ?? 'Deleted account'}</span>
+                        {/* Borrows may land nowhere ("just track what you owe"). */}
+                        <span>
+                          {t.toName ??
+                            (accounts.find((a) => a.id === t.fromAccountId)?.type === 'loan'
+                              ? 'Not deposited'
+                              : 'Deleted account')}
+                        </span>
                       </span>
                     </span>
                   </td>

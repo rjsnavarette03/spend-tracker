@@ -7,14 +7,18 @@ final class Mailer
      * Send a plain-text email. In production this uses PHP mail(); when the
      * config sets 'mail_log_file' (local dev/tests) the message is appended to
      * that file instead of being sent, so the reset flow is testable offline.
+     *
+     * @param list<string> $extraHeaders whole header lines (e.g. List-Unsubscribe),
+     *   built server-side — never from request input.
      */
-    public static function send(string $to, string $subject, string $body): bool
+    public static function send(string $to, string $subject, string $body, array $extraHeaders = []): bool
     {
         $from = (string)Http::config('mail_from', 'noreply@' . self::hostOnly());
         $logFile = Http::config('mail_log_file');
 
         if (is_string($logFile) && $logFile !== '') {
-            $entry = "TO: $to\nFROM: $from\nSUBJECT: $subject\n\n$body\n----\n";
+            $extra = $extraHeaders === [] ? '' : implode("\n", $extraHeaders) . "\n";
+            $entry = "TO: $to\nFROM: $from\nSUBJECT: $subject\n$extra\n$body\n----\n";
             return file_put_contents($logFile, $entry, FILE_APPEND | LOCK_EX) !== false;
         }
 
@@ -24,7 +28,13 @@ final class Mailer
             'Content-Type: text/plain; charset=utf-8',
             'MIME-Version: 1.0',
             'X-Mailer: SpendTracker',
+            ...$extraHeaders,
         ];
+        // Headers are ASCII-only: a subject naming a user's item ("Café
+        // rent is due today") must be MIME-encoded.
+        if (preg_match('/[^\x20-\x7E]/', $subject) === 1) {
+            $subject = mb_encode_mimeheader($subject, 'UTF-8', 'B', "\r\n");
+        }
         // -f sets the envelope sender so the host's MTA accepts it.
         return @mail($to, $subject, $body, implode("\r\n", $headers), '-f' . $from);
     }

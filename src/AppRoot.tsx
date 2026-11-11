@@ -7,6 +7,7 @@ import AppLayout, { useAppContext } from './App';
 // signed-out flows paint instantly with no chunk fetch or Suspense flash.
 import { Login } from './auth/Login';
 import { ResetPassword } from './auth/ResetPassword';
+import { Unsubscribe } from './auth/Unsubscribe';
 import { VerifyEmail } from './auth/VerifyEmail';
 import { Landing } from './pages/Landing';
 import { LegalPage } from './pages/Legal';
@@ -19,6 +20,7 @@ const Accounts = lazy(() => import('./pages/Accounts').then((m) => ({ default: m
 const Budgets = lazy(() => import('./pages/Budgets').then((m) => ({ default: m.Budgets })));
 const Categories = lazy(() => import('./pages/Categories').then((m) => ({ default: m.Categories })));
 const Dashboard = lazy(() => import('./pages/Dashboard').then((m) => ({ default: m.Dashboard })));
+const Schedule = lazy(() => import('./pages/Schedule').then((m) => ({ default: m.Schedule })));
 const Settings = lazy(() => import('./pages/Settings').then((m) => ({ default: m.Settings })));
 const Subscriptions = lazy(() => import('./pages/Subscriptions').then((m) => ({ default: m.Subscriptions })));
 const Transactions = lazy(() => import('./pages/Transactions').then((m) => ({ default: m.Transactions })));
@@ -46,6 +48,18 @@ function readVerifyToken(): string | null {
 function clearVerifyParam(): void {
   const url = new URL(window.location.href);
   url.searchParams.delete('verify');
+  window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+}
+
+// The unsubscribe link in reminder emails (?unsubscribe=<token>). Kept even
+// when malformed — the API's GET redirect passes a bad token on as '' — so the
+// screen can say the link is broken instead of silently showing the landing.
+function readUnsubscribeToken(): string | null {
+  return new URLSearchParams(window.location.search).get('unsubscribe');
+}
+function clearUnsubscribeParam(): void {
+  const url = new URL(window.location.href);
+  url.searchParams.delete('unsubscribe');
   window.history.replaceState({}, '', url.pathname + url.search + url.hash);
 }
 
@@ -109,6 +123,7 @@ export function AppRoot() {
   const [googleClientId, setGoogleClientId] = useState('');
   const [resetToken, setResetToken] = useState<string | null>(readResetToken);
   const [verifyToken, setVerifyToken] = useState<string | null>(readVerifyToken);
+  const [unsubscribeToken, setUnsubscribeToken] = useState<string | null>(readUnsubscribeToken);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -219,6 +234,24 @@ export function AppRoot() {
     );
   }
 
+  // Reminder email unsubscribe link: needs no session, so it shows signed in
+  // or out. Afterwards a signed-in user lands on Settings (where the switch
+  // now reads Off) once the session is reloaded — the layout keeps the user it
+  // mounted with.
+  if (unsubscribeToken !== null) {
+    return (
+      <Unsubscribe
+        token={unsubscribeToken}
+        onDone={async (changed) => {
+          clearUnsubscribeParam();
+          if (phase === 'authed') await check();
+          setUnsubscribeToken(null);
+          navigate(phase !== 'authed' ? '/' : changed ? '/settings' : '/dashboard', { replace: true });
+        }}
+      />
+    );
+  }
+
   // Privacy Policy & Terms are public: reachable whether signed in, signed out,
   // or still loading the session — so links work from anywhere.
   if (location.pathname === '/privacy') return <LegalPage doc="privacy" />;
@@ -259,6 +292,7 @@ export function AppRoot() {
           <Route path="transactions" element={<TransactionsPage />} />
           <Route path="accounts" element={<AccountsPage />} />
           <Route path="accounts/:id" element={<AccountDetail />} />
+          <Route path="schedule" element={<Schedule />} />
           <Route path="subscriptions" element={<Subscriptions />} />
           <Route path="budgets" element={<BudgetsPage />} />
           <Route path="categories" element={<CategoriesPage />} />

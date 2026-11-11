@@ -43,6 +43,16 @@ final class Http
         }
     }
 
+    /**
+     * Config only — no session or headers. For command-line jobs
+     * (cron/send-reminders.php), which use the mailer and DB but no request.
+     * @param array<string, mixed> $config
+     */
+    public static function initCli(array $config): void
+    {
+        self::$config = $config;
+    }
+
     public static function config(string $key, mixed $default = null): mixed
     {
         return self::$config[$key] ?? $default;
@@ -174,5 +184,29 @@ final class Http
     public static function throttleClear(string $key): void
     {
         DB::exec('DELETE FROM auth_throttle WHERE tkey = ?', [substr($key, 0, 190)]);
+    }
+
+    /**
+     * Attempts counted in $key's current window, without counting one, and
+     * the seconds until that window resets: [0, 0] when there is none.
+     * @return array{0: int, 1: int}
+     */
+    public static function throttleUsage(string $key, int $windowSec): array
+    {
+        $row = DB::one('SELECT attempts, window_start FROM auth_throttle WHERE tkey = ?', [substr($key, 0, 190)]);
+        if ($row === null) {
+            return [0, 0];
+        }
+        $elapsed = time() - (int)$row['window_start'];
+        if ($elapsed >= $windowSec) {
+            return [0, 0];
+        }
+        return [(int)$row['attempts'], $windowSec - $elapsed];
+    }
+
+    /** Hands back one counted attempt, for a request that failed through no fault of the caller. */
+    public static function throttleRefund(string $key): void
+    {
+        DB::exec('UPDATE auth_throttle SET attempts = attempts - 1 WHERE tkey = ? AND attempts > 0', [substr($key, 0, 190)]);
     }
 }

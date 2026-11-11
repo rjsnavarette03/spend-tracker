@@ -118,6 +118,23 @@ If a user signs in with Google using the same email as an existing password acco
 
 ---
 
+## Enabling the AI assistant (optional, free, ~3 minutes)
+
+The floating **Ask about your money** chat (a bubble in the bottom-right corner of every signed-in page) stays hidden until the server has an API key. It uses Groq's free tier by default (no card needed):
+
+1. Sign up at https://console.groq.com and create a key under **API Keys**.
+2. Put it in `config.php` (on the server, never in the repo):
+   ```php
+   'ai' => [
+       'api_key' => 'gsk_…',
+   ],
+   ```
+3. Reload the app (a page already open keeps running the old version until reloaded): the chat bubble appears in the bottom-right corner.
+
+The free quota is shared by everyone using the site (roughly 1,000 requests and 200,000 tokens a day for the default model; check **Settings → Limits** in the Groq console), so each user gets 20 questions a day (`'daily_limit'`). When the quota runs out, users see a "busy, try again" message instead of an answer. Users' questions and a summary of their data are sent to Groq; the Privacy Policy says so. If you switch to another provider (`'base_url'`, `'model'`, `'provider_name'`), update the Privacy Policy too.
+
+---
+
 ## Updating the app later
 
 Rebuild (`npm run build && npm run assemble`) and re-upload everything **except** `api/app/config.php` (keep your existing one). The `assemble` step never generates a `config.php`, so your credentials are safe from being overwritten. Because JS/CSS filenames are content-hashed, browsers pick up the new version immediately.
@@ -131,3 +148,5 @@ Rebuild (`npm run build && npm run assemble`) and re-upload everything **except*
 | Login works but you're logged out on refresh | HTTPS/`Force HTTPS` not enabled — the secure session cookie needs it. |
 | Google button doesn't appear | `google_client_id` is empty, or the JS origin in Google Console doesn't exactly match the https subdomain. |
 | Pages 404 on refresh | `.htaccess` didn't upload, or `mod_rewrite` is off (it's on by default on Hostinger). |
+| AI chat doesn't appear | `'ai' => ['api_key' => …]` is missing or empty in `config.php`. |
+| AI chat says "not set up correctly" | The key is wrong or the model was retired: the hPanel error log has the provider's message. Set a current model from console.groq.com/docs/models as `'model'`. |

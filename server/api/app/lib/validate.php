@@ -184,6 +184,89 @@ final class Validate
         return $v;
     }
 
+    /** Optional date: null/'' -> null, otherwise a strict YYYY-MM-DD. */
+    public static function dateOrNull(mixed $d): ?string
+    {
+        if ($d === null || $d === '') {
+            return null;
+        }
+        return self::date($d);
+    }
+
+    /** What a payment-schedule row represents (see schedule_items). */
+    public static function scheduleKind(mixed $k): string
+    {
+        $kinds = ['income', 'loan', 'card', 'bill', 'allowance', 'savings', 'subscription'];
+        if (!is_string($k) || !in_array($k, $kinds, true)) {
+            throw new ApiError('Invalid schedule item kind', 422);
+        }
+        return $k;
+    }
+
+    /** Schedule amount: a fixed figure, or (bills) the last-3-months average. */
+    public static function scheduleAmountMode(mixed $m): string
+    {
+        if ($m !== 'fixed' && $m !== 'avg3') {
+            throw new ApiError('Invalid amount mode', 422);
+        }
+        return $m;
+    }
+
+    /** Where a payday that lands on a weekend moves to. */
+    public static function weekendShift(mixed $s): string
+    {
+        if ($s !== 'none' && $s !== 'before' && $s !== 'after') {
+            throw new ApiError('Invalid weekend rule', 422);
+        }
+        return $s;
+    }
+
+    /** Day of the week for weekly items: 0 = Sunday .. 6 = Saturday. */
+    public static function weekDay(mixed $v): int
+    {
+        if (is_string($v) && ctype_digit($v)) {
+            $v = (int)$v;
+        }
+        if (is_float($v) && floor($v) === $v) {
+            $v = (int)$v;
+        }
+        if (!is_int($v) || $v < 0 || $v > 6) {
+            throw new ApiError('Day of the week must be between 0 (Sunday) and 6 (Saturday)', 422);
+        }
+        return $v;
+    }
+
+    /**
+     * Savings milestones: up to 8 positive amounts in cents, returned sorted
+     * ascending without duplicates. null/'' -> [] (none).
+     * @return list<int>
+     */
+    public static function milestones(mixed $v): array
+    {
+        if ($v === null || $v === '') {
+            return [];
+        }
+        if (!is_array($v) || count($v) > 8) {
+            throw new ApiError('Use up to 8 milestones', 422);
+        }
+        $out = array_values(array_unique(array_map(static fn($m): int => self::amountCents($m), array_values($v))));
+        sort($out);
+        return $out;
+    }
+
+    /** Optional note filter for bill estimates: null/blank -> null, max 60 chars. */
+    public static function keywordOrNull(mixed $k): ?string
+    {
+        $k = trim((string)(is_scalar($k) ? $k : ''));
+        if ($k === '') {
+            return null;
+        }
+        if (mb_strlen($k) > 60) {
+            throw new ApiError('Keyword is too long (max 60 characters)', 422);
+        }
+        return $k;
+    }
+
     /**
      * Optional custom account image, stored inline as a base64 data URI.
      * null / '' means "no image" (the account falls back to its color).
@@ -248,5 +331,17 @@ final class Validate
             throw new ApiError('Invalid currency code', 422);
         }
         return $c;
+    }
+
+    /** An IANA time zone name as browsers report it (e.g. 'Asia/Manila'). */
+    public static function timezone(mixed $tz): string
+    {
+        $tz = is_string($tz) ? trim($tz) : '';
+        // ALL_WITH_BC also accepts older aliases some browsers still report
+        // (e.g. 'Asia/Calcutta').
+        if ($tz === '' || !in_array($tz, DateTimeZone::listIdentifiers(DateTimeZone::ALL_WITH_BC), true)) {
+            throw new ApiError('Unknown time zone', 422);
+        }
+        return $tz;
     }
 }

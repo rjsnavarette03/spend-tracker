@@ -43,6 +43,20 @@ return [
     // periods). Set to your user base's zone; defaults to UTC when absent.
     'timezone' => 'Asia/Manila',
 
+    // AI assistant: the floating chat bubble on every signed-in page. Leave api_key empty
+    // to hide it. Any OpenAI-compatible Chat Completions API works; the default
+    // is Groq's free tier: create a key at https://console.groq.com/keys.
+    // Users' questions and a summary of their data go to this provider, so
+    // keep the privacy policy's "AI assistant" section in step if you change it.
+    'ai' => [
+        'api_key' => '',
+        // 'base_url' => 'https://api.groq.com/openai/v1',
+        // 'model' => 'openai/gpt-oss-120b',
+        // 'provider_name' => 'Groq',        // shown to users under the chat
+        // 'daily_limit' => 20,              // questions per user per day
+        // 'reasoning_effort' => 'low',      // '' for models that don't take it
+    ],
+
     // Session cookie name (no need to change).
     'session_name' => 'spendtracker_sid',
 ];

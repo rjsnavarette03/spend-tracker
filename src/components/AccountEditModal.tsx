@@ -1,5 +1,6 @@
 import { ChangeEvent, FormEvent, useRef, useState } from 'react';
 import type { Account, AccountType } from '../../shared/types';
+import { isArchived } from '../accounts';
 import { api } from '../api';
 import {
   centsToInput,
@@ -71,7 +72,7 @@ export function AccountEditModal({
   const fileRef = useRef<HTMLInputElement>(null);
 
   const isNewLoan = !initial && type === 'loan';
-  const debitAccounts = accounts.filter((a) => a.type === 'debit');
+  const debitAccounts = accounts.filter((a) => a.type === 'debit' && !isArchived(a));
 
   const onPickFile = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

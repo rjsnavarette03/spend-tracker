@@ -7,6 +7,8 @@ final class Auth
     private const VERIFY_TTL = 1800; // 30 minutes
     /** Wrong-code guesses allowed before a code is burned (resend required). */
     private const MAX_CODE_ATTEMPTS = 6;
+    /** The users columns publicUser() reads. */
+    private const USER_COLS = 'id, email, name, password_hash, google_sub, currency, email_verified, reminder_emails, timezone';
 
     public static function requireUser(): int
     {
@@ -42,7 +44,7 @@ final class Auth
         if (!is_int($uid) || $uid <= 0) {
             return null;
         }
-        $u = DB::one('SELECT id, email, name, password_hash, google_sub, currency, email_verified FROM users WHERE id = ?', [$uid]);
+        $u = DB::one('SELECT ' . self::USER_COLS . ' FROM users WHERE id = ?', [$uid]);
         if ($u === null) {
             unset($_SESSION['uid']);
             return null;
@@ -67,6 +69,8 @@ final class Auth
             // Fallback true (verified) if the column hasn't migrated in yet, so
             // nobody is locked out mid-deploy.
             'emailVerified' => !array_key_exists('email_verified', $u) || (int)$u['email_verified'] === 1,
+            'reminderEmails' => (int)($u['reminder_emails'] ?? 0) === 1,
+            'reminderTimezone' => isset($u['timezone']) ? (string)$u['timezone'] : null,
         ];
     }
 
@@ -75,6 +79,69 @@ final class Auth
         $currency = Validate::currency($currency);
         DB::exec('UPDATE users SET currency = ? WHERE id = ?', [$currency, $uid]);
         return $currency;
+    }
+
+    /**
+     * Turn reminder emails on or off. Turning them on saves the browser's time
+     * zone (the daily email goes out around 7 AM there) and, when they were
+     * off, issues a fresh unsubscribe token: links in emails sent before they
+     * were turned off stop working.
+     *
+     * @return array{reminderEmails: bool, reminderTimezone: string|null}
+     */
+    public static function setReminders(int $uid, mixed $enabled, mixed $timezone): array
+    {
+        if (!is_bool($enabled)) {
+            throw new ApiError('enabled must be true or false', 422);
+        }
+        $u = DB::one('SELECT email, reminder_emails, timezone, reminder_token FROM users WHERE id = ?', [$uid]);
+        if ($u === null) {
+            throw new ApiError('Not signed in', 401);
+        }
+        if (!$enabled) {
+            DB::exec('UPDATE users SET reminder_emails = 0 WHERE id = ?', [$uid]);
+            return ['reminderEmails' => false, 'reminderTimezone' => isset($u['timezone']) ? (string)$u['timezone'] : null];
+        }
+        $timezone = Validate::timezone($timezone);
+        $wasOn = (int)$u['reminder_emails'] === 1 && $u['reminder_token'] !== null;
+        $token = $wasOn ? (string)$u['reminder_token'] : bin2hex(random_bytes(32));
+        DB::exec(
+            'UPDATE users SET reminder_emails = 1, timezone = ?, reminder_token = ? WHERE id = ?',
+            [$timezone, $token, $uid]
+        );
+        if (!$wasOn) {
+            try {
+                // Toggling on and off repeatedly shouldn't flood the inbox:
+                // past the limit the setting still saves, without the email.
+                Http::throttle('reminders_on:' . $uid, 5, 3600);
+                $mail = ReminderEmail::turnedOn($timezone, $token);
+                Mailer::send((string)$u['email'], $mail['subject'], $mail['body'], $mail['headers']);
+            } catch (ApiError) {
+                // over the limit — skip the confirmation only
+            }
+        }
+        return ['reminderEmails' => true, 'reminderTimezone' => $timezone];
+    }
+
+    /**
+     * Turn reminder emails off with the token from an email's unsubscribe
+     * link. No session needed: the link is opened from a mailbox, possibly on
+     * another device, and mail providers POST to it from their own servers for
+     * one-click unsubscribe. The token can do nothing else, and it keeps
+     * working after use, so a second click still succeeds.
+     */
+    public static function unsubscribeReminders(mixed $token): void
+    {
+        Http::throttle('unsub:' . Http::clientIp(), 30, 900);
+        $token = is_string($token) ? $token : '';
+        if (!preg_match('/^[a-f0-9]{64}$/', $token)) {
+            throw new ApiError('This unsubscribe link is invalid.', 400);
+        }
+        $u = DB::one('SELECT id FROM users WHERE reminder_token = ?', [$token]);
+        if ($u === null) {
+            throw new ApiError('This unsubscribe link is no longer valid. You can turn reminder emails off in Settings.', 400);
+        }
+        DB::exec('UPDATE users SET reminder_emails = 0 WHERE id = ?', [(int)$u['id']]);
     }
 
     /**
@@ -349,7 +416,7 @@ final class Auth
         DB::exec('DELETE FROM password_resets WHERE user_id = ?', [$uid]);
         DB::exec('DELETE FROM email_verifications WHERE user_id = ?', [$uid]);
 
-        $u = DB::one('SELECT id, email, name, password_hash, google_sub, currency, email_verified FROM users WHERE id = ?', [$uid]);
+        $u = DB::one('SELECT ' . self::USER_COLS . ' FROM users WHERE id = ?', [$uid]);
         assert($u !== null);
         // A successful reset proves control of the mailbox — clear login locks.
         Http::throttleClear('login_acct:' . (string)$u['email']);
@@ -402,7 +469,7 @@ final class Auth
         Http::throttle('verify:' . $uid, 20, 900);
         Http::throttle('verify_ip:' . Http::clientIp(), 60, 900);
 
-        $u = DB::one('SELECT id, email, name, password_hash, google_sub, currency, email_verified FROM users WHERE id = ?', [$uid]);
+        $u = DB::one('SELECT ' . self::USER_COLS . ' FROM users WHERE id = ?', [$uid]);
         if ($u === null) {
             throw new ApiError('Not signed in', 401);
         }
@@ -464,7 +531,7 @@ final class Auth
         $uid = (int)$row['user_id'];
         DB::exec('UPDATE users SET email_verified = 1 WHERE id = ?', [$uid]);
         DB::exec('DELETE FROM email_verifications WHERE user_id = ?', [$uid]);
-        $u = DB::one('SELECT id, email, name, password_hash, google_sub, currency, email_verified FROM users WHERE id = ?', [$uid]);
+        $u = DB::one('SELECT ' . self::USER_COLS . ' FROM users WHERE id = ?', [$uid]);
         assert($u !== null);
         self::establishSession($uid);
         return self::publicUser($u);

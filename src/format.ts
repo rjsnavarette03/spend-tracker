@@ -165,6 +165,20 @@ export function fmtMoney(cents: number): string {
   return money.format(cents / 100);
 }
 
+/** "₱180K" — for chart axes and chips where the full amount won't fit. */
+export function compactMoney(cents: number): string {
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: currencyCode,
+      notation: 'compact',
+      maximumFractionDigits: 1,
+    }).format(cents / 100);
+  } catch {
+    return fmtMoney(cents);
+  }
+}
+
 export function fmtSigned(cents: number, type: 'income' | 'expense'): string {
   return `${type === 'income' ? '+' : '−'}${money.format(cents / 100)}`;
 }
