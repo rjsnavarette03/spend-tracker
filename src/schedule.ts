@@ -378,6 +378,15 @@ export function windowLabel([from, to]: [string, string]): string {
 // balance, so it's never "overdue" and never deducted again.
 export type DueState = 'paid' | 'partial' | 'overdue' | 'today' | 'upcoming' | 'lapsed';
 
+/**
+ * Past its due date and not fully paid. A partly paid date stays 'partial'
+ * in dueStatuses (it carries what's left), but once its date has passed it
+ * is overdue like any other — every view should say so.
+ */
+export function isPastDue(o: { dueDate: string }, st: DueStatus | undefined, today: string): boolean {
+  return o.dueDate < today && (st?.state === 'overdue' || st?.state === 'partial');
+}
+
 export interface DueStatus {
   state: DueState;
   paidCents: number;
@@ -611,10 +620,9 @@ export function buildPlanner(
   // Anything past due and unsettled that no card shows (its payday's period
   // has closed) still has to surface somewhere.
   const onCards = new Set(plans.flatMap((p) => p.outflows));
-  const overdue = outflows.filter((o) => {
-    const st = statuses.get(occurrenceKey(o.item.id, o.dueDate));
-    return o.dueDate < today && (st?.state === 'overdue' || st?.state === 'partial') && !onCards.has(o);
-  });
+  const overdue = outflows.filter(
+    (o) => isPastDue(o, statuses.get(occurrenceKey(o.item.id, o.dueDate)), today) && !onCards.has(o)
+  );
   return { plans, statuses, overdue, unfunded: unfunded.filter((o) => o.dueDate <= lastShown) };
 }
 
@@ -688,7 +696,7 @@ export function buildCalendar(
         ? 'paid'
         : status?.state === 'lapsed'
           ? 'past'
-          : status?.state === 'overdue'
+          : isPastDue(occurrence, status, today)
             ? 'overdue'
             : shortCents > 0
               ? 'atrisk'
@@ -859,6 +867,13 @@ export function buildGoals(items: ScheduleItem[], data: ScheduleData, ctx: Sched
 // "doesn't finish" (~10 years of monthly payments).
 const DEBT_HORIZON_DAYS = 3660;
 
+// Installments are rounded to the cent, so a schedule can end a few centavos
+// short of the balance (6 × ₱3,914.22 = ₱23,485.32 against ₱23,485.36).
+// Lenders settle that on the last payment, and so does the plan: a remainder
+// under one unit of the currency is added to the final payment instead of
+// leaving the debt "not paid off by the schedule".
+const DEBT_ROUNDING_CENTS = 100;
+
 export interface DebtLine {
   account: Account;
   item: ScheduleItem | null; // its loan/card schedule item; null = not on the schedule
@@ -924,6 +939,7 @@ export function buildDebtPlan(
       if (!item || owed === 0) return line;
 
       let balance = owed;
+      let last: { date: string; payment: { name: string; amountCents: number } } | null = null;
       const mine = occurrences
         .filter((o) => o.item.id === item.id)
         .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
@@ -936,8 +952,16 @@ export function buildDebtPlan(
         balance -= amount;
         line.paymentsLeft++;
         line.lastPaymentCents = amount;
-        paymentsOn.set(date, [...(paymentsOn.get(date) ?? []), { name: item.name, amountCents: amount }]);
+        const payment = { name: item.name, amountCents: amount };
+        paymentsOn.set(date, [...(paymentsOn.get(date) ?? []), payment]);
+        last = { date, payment };
         if (balance === 0) line.payoffDate = date;
+      }
+      if (last && balance > 0 && balance < DEBT_ROUNDING_CENTS) {
+        last.payment.amountCents += balance;
+        line.lastPaymentCents += balance;
+        line.payoffDate = last.date;
+        balance = 0;
       }
       line.leftoverCents = balance;
       return line;

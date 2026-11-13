@@ -1,5 +1,5 @@
-import { fmtMoney } from '../format';
-import { KIND_LABEL, shortDateLabel } from '../schedule';
+import { fmtMoney, todayStr } from '../format';
+import { isPastDue, KIND_LABEL, shortDateLabel } from '../schedule';
 import type { DueStatus, ItemOccurrence, PaydayOccurrence, PaydayStatus } from '../schedule';
 import { BanknoteIcon, PlusIcon } from './Icons';
 
@@ -7,13 +7,24 @@ import { BanknoteIcon, PlusIcon } from './Icons';
 // day details and the reminders — with its status and the Mark-as-paid
 // button. PaydayLine is the same line for a payday, with Log received.
 
-/** Most urgent first: settled, overdue, then a forecast shortfall ("at risk"). */
-export function dueTag(o: ItemOccurrence, st: DueStatus | undefined, shortCents: number): { label: string; cls: string } | null {
+/**
+ * Most urgent first: settled, overdue, then a forecast shortfall ("at risk").
+ * A partly paid date past its due date is overdue too, with what's left.
+ */
+export function dueTag(
+  o: ItemOccurrence,
+  st: DueStatus | undefined,
+  shortCents: number,
+  today: string = todayStr()
+): { label: string; cls: string } | null {
   if (st?.state === 'paid') {
     return { label: st.extraCents > 0 ? `Paid +${fmtMoney(st.extraCents)}` : 'Paid', cls: 'due-ok' };
   }
   if (st?.state === 'lapsed') return { label: 'Past', cls: '' };
   if (st?.state === 'overdue') return { label: 'Overdue', cls: 'due-now' };
+  if (st?.state === 'partial' && isPastDue(o, st, today)) {
+    return { label: `Overdue · ${fmtMoney(st.remainingCents)} left`, cls: 'due-now' };
+  }
   if (shortCents > 0) return { label: `Short ${fmtMoney(shortCents)}`, cls: 'due-now' };
   if (o.item.kind === 'subscription') return { label: 'Auto-charged', cls: '' };
   if (st?.state === 'partial') return { label: `${fmtMoney(st.remainingCents)} left`, cls: 'due-soon' };

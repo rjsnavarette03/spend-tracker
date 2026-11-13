@@ -24,6 +24,7 @@ import {
   dueStatuses,
   estimateWindow,
   fundingPayday,
+  isPastDue,
   itemOccurrences,
   monthlyCents,
   nthOccurrenceDate,
@@ -35,7 +36,7 @@ import {
   shiftForWeekend,
   withSubscriptions,
 } from './schedule';
-import type { ScheduleContext } from './schedule';
+import type { ItemOccurrence, ScheduleContext } from './schedule';
 
 // Unit tests for the Schedule's pure date/money rules (src/schedule.ts).
 // Everything is computed from a fixed "today" so results never depend on
@@ -677,6 +678,32 @@ describe('buildCalendar', () => {
     expect(states(oct, '2026-10-24')).toEqual(['Groceries:past']);
     expect(states(oct, '2026-10-31')).toEqual(['Groceries:upcoming']);
   });
+
+  it('keeps a partly paid date overdue once it is past due, even when also short', () => {
+    const part = data(items, [paid(water, '2026-10-20', 200_00), paid(loan, '2026-11-05', 1000_00)]);
+    const shortBy = new Map([
+      [occurrenceKey(4, '2026-10-20'), 300_00],
+      [occurrenceKey(2, '2026-11-05'), 2000_00],
+    ]);
+    expect(states(buildCalendar('2026-10', items, part, c, TODAY, shortBy), '2026-10-20')).toEqual(['Water:overdue']);
+    // Not due yet: a partial payment plus a shortfall is still only at risk.
+    expect(states(buildCalendar('2026-11', items, part, c, TODAY, shortBy), '2026-11-05')).toEqual(['Loan:atrisk']);
+  });
+});
+
+describe('isPastDue', () => {
+  const water = item('bill', { id: 4, name: 'Water', dueDay: 20, amountCents: 500_00, startDate: '2026-10-01' });
+  const occ = (dueDate: string) => ({ item: water, dueDate, amountCents: 500_00 }) as ItemOccurrence;
+  const st = (d: ScheduleData, dueDate: string) => dueStatuses([occ(dueDate)], d, TODAY).get(occurrenceKey(4, dueDate));
+
+  it('counts unpaid and partly paid dates before today, nothing else', () => {
+    const d = data([water], [paid(water, '2026-09-20', 200_00), paid(water, '2026-10-20', 500_00)]);
+    expect(isPastDue(occ('2026-08-20'), st(d, '2026-08-20'), TODAY)).toBe(true); // unpaid
+    expect(isPastDue(occ('2026-09-20'), st(d, '2026-09-20'), TODAY)).toBe(true); // ₱300 left
+    expect(isPastDue(occ('2026-10-20'), st(d, '2026-10-20'), TODAY)).toBe(false); // paid
+    const partToday = data([water], [paid(water, TODAY, 100_00)]);
+    expect(isPastDue(occ(TODAY), st(partToday, TODAY), TODAY)).toBe(false); // due today, not late yet
+  });
 });
 
 // ---------- debt payoff ----------
@@ -742,6 +769,21 @@ describe('buildDebtPlan', () => {
     const plan = buildDebtPlan([short, card], data([short, card], october), c, TODAY);
     expect(line(plan, 10)).toMatchObject({ paymentsLeft: 2, payoffDate: null, leftoverCents: 4000_00 });
     expect(plan.debtFreeDate).toBeNull();
+  });
+
+  it('settles a rounding remainder under one unit on the last payment', () => {
+    // 3 × ₱3,000.00 left against ₱9,000.04 owed: the last payment becomes ₱3,000.04.
+    const short = { ...car, endDate: '2027-01-05' };
+    const dust = ctx([accounts[0], { ...carAccount, balanceCents: -9000_04 }, cardAccount]);
+    const plan = buildDebtPlan([short, card], data([short, card], october), dust, TODAY);
+    expect(line(plan, 10)).toMatchObject({ paymentsLeft: 3, lastPaymentCents: 3000_04, payoffDate: '2027-01-05', leftoverCents: 0 });
+    expect(plan.debtFreeDate).toBe('2027-01-05');
+    expect(plan.points.find((p) => p.date === '2027-01-05')).toMatchObject({ totalCents: 0, payments: [{ name: 'Car', amountCents: 3000_04 }] });
+    // A full unit or more is a real gap, not rounding.
+    const gap = ctx([accounts[0], { ...carAccount, balanceCents: -9001_00 }, cardAccount]);
+    const unfinished = buildDebtPlan([short, card], data([short, card], october), gap, TODAY);
+    expect(line(unfinished, 10)).toMatchObject({ lastPaymentCents: 3000_00, payoffDate: null, leftoverCents: 1_00 });
+    expect(unfinished.debtFreeDate).toBeNull();
   });
 
   it('treats a paused item as not scheduled, and nothing owed as no plan', () => {
