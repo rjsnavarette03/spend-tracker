@@ -20,6 +20,7 @@ export function MarkPaidModal({
   status,
   accounts,
   categories,
+  defaultAmountCents,
   onClose,
   onSaved,
 }: {
@@ -27,6 +28,9 @@ export function MarkPaidModal({
   status: DueStatus | undefined;
   accounts: Account[];
   categories: Category[];
+  // Opens with this amount instead of what's still due (e.g. "pay what's on
+  // hand now" from a forecast shortfall). Still editable.
+  defaultAmountCents?: number;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -40,7 +44,8 @@ export function MarkPaidModal({
   );
   const paidSoFar = status?.paidCents ?? 0;
   // Already settled → this is an extra payment; offer the regular amount again.
-  const suggested = status && status.remainingCents > 0 ? status.remainingCents : occurrence.amountCents;
+  const suggested =
+    defaultAmountCents ?? (status && status.remainingCents > 0 ? status.remainingCents : occurrence.amountCents);
 
   const [amount, setAmount] = useState(suggested > 0 ? centsToInput(suggested) : '');
   const [fee, setFee] = useState('');

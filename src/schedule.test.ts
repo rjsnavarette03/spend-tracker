@@ -34,6 +34,7 @@ import {
   paydayStatuses,
   remainingCount,
   shiftForWeekend,
+  shortfallHelp,
   withSubscriptions,
 } from './schedule';
 import type { ItemOccurrence, ScheduleContext } from './schedule';
@@ -629,6 +630,71 @@ describe('buildForecast', () => {
     expect(short(300_00)).toBe(200_00);
     expect(short(-1000_00)).toBe(500_00); // already overdrawn: all of it
     expect(short(500_00)).toBe(0);
+  });
+});
+
+describe('shortfallHelp', () => {
+  const payday = item('income', { id: 1, name: 'Payday', dueDay: 8, weekendShift: 'before', amountCents: 54000_00, accountId: 1 });
+  const goal = item('savings', { id: 2, name: 'Emergency fund', accountId: 2, dueDay: 23, amountCents: 5000_00, payFromAccountId: 1, startDate: '2026-12-01' });
+  const rent = item('bill', { id: 4, name: 'Rent', dueDay: 30, amountCents: 20000_00, payFromAccountId: 3, startDate: '2026-10-01' });
+  const items = [payday, goal, rent];
+  const accounts = (savings: number) => [
+    account(1, 'debit', 7500_00, { name: 'Bank' }),
+    account(2, 'debit', savings, { name: 'Savings' }),
+    account(3, 'debit', 500_00, { name: 'Wallet' }),
+    account(4, 'debit', 0, { name: 'Old wallet', archivedAt: '2026-01-01 00:00:00' }),
+  ];
+  const run = (c: ScheduleContext, list = items, days = 12) => {
+    const f = buildForecast(list, data(list), c, TODAY, days);
+    return { f, help: shortfallHelp(f, c) };
+  };
+
+  it('offers the savings account and paying what is on hand', () => {
+    const c = ctx(accounts(50000_00));
+    const { help } = run(c);
+    // 8,000 cash (Bank + Wallet), 20,000 rent on Oct 30: 12,000 short.
+    expect(help.map((h) => [h.event.item.name, h.event.date, h.event.shortCents, h.needCents])).toEqual([
+      ['Rent', '2026-10-30', 12000_00, 12000_00],
+    ]);
+    expect(help[0].fixes).toEqual([
+      { kind: 'move', from: c.accounts[1], to: c.accounts[2], amountCents: 12000_00, covers: true }, // into the pay-from account
+      { kind: 'partial', amountCents: 8000_00, restCents: 12000_00, nextPayday: '2026-11-06' },
+    ]);
+  });
+
+  it('needs the earlier shortfalls covered too, and falls back to the fullest cash account', () => {
+    const power = item('bill', { id: 5, name: 'Power', dueDay: 2, amountCents: 3000_00, startDate: '2026-11-01' });
+    const noPayFrom = { ...rent, payFromAccountId: null };
+    const c = ctx(accounts(50000_00));
+    const { help } = run(c, [goal, noPayFrom, power]);
+    // After rent the balance is -12,000, so power needs its 3,000 plus that.
+    expect(help.map((h) => [h.event.item.name, h.event.shortCents, h.needCents])).toEqual([
+      ['Rent', 12000_00, 12000_00],
+      ['Power', 3000_00, 15000_00],
+    ]);
+    expect(help[1].fixes).toEqual([{ kind: 'move', from: c.accounts[1], to: c.accounts[0], amountCents: 15000_00, covers: true }]);
+  });
+
+  it('offers everything in a savings account that falls short only once', () => {
+    const power = item('bill', { id: 5, name: 'Power', dueDay: 2, amountCents: 3000_00, startDate: '2026-11-01' });
+    const c = ctx(accounts(5000_00));
+    const { help } = run(c, [goal, rent, power]);
+    expect(help[0].fixes[0]).toEqual({ kind: 'move', from: c.accounts[1], to: c.accounts[2], amountCents: 5000_00, covers: false });
+    expect(help[1].fixes).toEqual([]);
+  });
+
+  it('has nothing to offer with empty savings and no cash', () => {
+    const c = ctx([account(1, 'debit', -100_00), account(2, 'debit', 0), account(3, 'debit', 0)]);
+    const { help } = run(c);
+    expect(help.map((h) => [h.needCents, h.fixes])).toEqual([[20100_00, []]]);
+  });
+
+  it('never offers an early payment for a subscription, which charges itself', () => {
+    const subs = [subscription(1, { name: 'Netflix', accountId: 3, amountCents: 9000_00, nextDate: '2026-10-30' })];
+    const c = ctx(accounts(50000_00), subs);
+    const { help } = run(c, withSubscriptions([payday, goal], subs), 5);
+    expect([help[0].event.item.name, help[0].event.shortCents]).toEqual(['Netflix', 1000_00]);
+    expect(help[0].fixes).toEqual([{ kind: 'move', from: c.accounts[1], to: c.accounts[2], amountCents: 1000_00, covers: true }]);
   });
 });
 

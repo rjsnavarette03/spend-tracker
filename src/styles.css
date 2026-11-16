@@ -3023,6 +3023,21 @@ select {
   font-size: 13.5px;
 }
 
+/* One-click fixes under a shortfall: move money in / pay what's on hand. */
+.fc-fixes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.fc-fixes .btn {
+  padding: 5px 11px;
+  font-size: 12.5px;
+  white-space: normal;
+  text-align: left;
+}
+
 .fc-amounts {
   display: flex;
   flex-direction: column;

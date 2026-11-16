@@ -18,6 +18,7 @@ import type {
   Subscription,
   WeekendShift,
 } from '../shared/types';
+import { isArchived } from './accounts';
 
 export function parseYmd(s: string): Date {
   const [y, m, d] = s.split('-').map(Number);
@@ -1120,4 +1121,66 @@ export function buildForecast(
   const shortfalls = events.filter((e) => e.shortCents > 0);
   const shortBy = new Map(shortfalls.map((e) => [occurrenceKey(e.item.id, e.dueDate), e.shortCents]));
   return { startCents, cashAccounts, setAside, days, events, shortfalls, shortBy, lowest, endCents: running };
+}
+
+// ---------- covering a shortfall ----------
+
+/**
+ * A way to act on one forecast shortfall, offered as a button under it:
+ *  - 'move': bring money in from a set-aside (savings-goal) account, the one
+ *    holding the most, capped at what it holds. It lands in the account the
+ *    item is paid from when that's a cash account, else in the cash account
+ *    with the highest balance. `covers` = enough for that date to be covered.
+ *  - 'partial': pay what's on hand now and leave the rest open; `nextPayday`
+ *    is the next expected salary after it, when the forecast reaches one.
+ */
+export type ShortfallFix =
+  | { kind: 'move'; from: Account; to: Account; amountCents: number; covers: boolean }
+  | { kind: 'partial'; amountCents: number; restCents: number; nextPayday: string | null };
+
+export interface ShortfallHelp {
+  event: ForecastEvent;
+  // Cash to add today for this date to be covered: its shortfall plus
+  // whatever the balance is already overdrawn by when it comes due. Money
+  // moved in fills the earliest gaps first, so this also covers every
+  // earlier date that needs less.
+  needCents: number;
+  fixes: ShortfallFix[];
+}
+
+/** Each forecast shortfall with what it would take to cover it, in order. */
+export function shortfallHelp(forecast: Forecast, ctx: ScheduleContext): ShortfallHelp[] {
+  const richest = (list: Account[]) =>
+    [...list].sort((a, b) => b.balanceCents - a.balanceCents || a.name.localeCompare(b.name))[0] as Account | undefined;
+  const from = richest(forecast.setAside.filter((a) => a.balanceCents > 0));
+  const open = forecast.cashAccounts.filter((a) => !isArchived(a));
+  let cappedOffered = false;
+
+  return forecast.shortfalls.map((e) => {
+    const needCents = e.amountCents - e.balanceBefore;
+    const fixes: ShortfallFix[] = [];
+
+    const payFromId =
+      e.item.kind === 'subscription'
+        ? (ctx.subscriptions.find((s) => s.id === e.item.subscriptionId)?.accountId ?? null)
+        : e.item.payFromAccountId;
+    const to = open.find((a) => a.id === payFromId) ?? richest(open);
+    if (from && to) {
+      const covers = from.balanceCents >= needCents;
+      // "Everything in savings" that still falls short is offered once, on
+      // the first date it can't cover, not repeated down the list.
+      if (covers || !cappedOffered) {
+        fixes.push({ kind: 'move', from, to, amountCents: Math.min(needCents, from.balanceCents), covers });
+        cappedOffered = cappedOffered || !covers;
+      }
+    }
+
+    // Subscriptions charge themselves in full, so there's nothing to pay early.
+    const onHand = Math.max(0, e.balanceBefore);
+    if (onHand > 0 && e.item.kind !== 'subscription') {
+      const next = forecast.events.find((x) => x.kind === 'in' && x.date > e.date);
+      fixes.push({ kind: 'partial', amountCents: onHand, restCents: e.amountCents - onHand, nextPayday: next?.date ?? null });
+    }
+    return { event: e, needCents, fixes };
+  });
 }

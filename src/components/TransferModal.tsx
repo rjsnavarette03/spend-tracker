@@ -7,10 +7,20 @@ import { CheckIcon, TransferIcon } from './Icons';
 import { Modal } from './Modal';
 import { MoneyInput } from './MoneyInput';
 
+/** A new transfer opened already filled in (e.g. covering a forecast shortfall). */
+export interface TransferPreset {
+  fromAccountId: number;
+  toAccountId: number;
+  amountCents: number;
+  note: string;
+  hint?: string; // shown above the form: what this transfer is for / costs
+}
+
 export function TransferModal({
   initial,
   accounts,
   defaultFromAccountId,
+  preset,
   onClose,
   onSaved,
 }: {
@@ -19,25 +29,32 @@ export function TransferModal({
   // When creating a new transfer, preselect this account as the source
   // (e.g. opened from a debit account's detail page). Ignored when editing.
   defaultFromAccountId?: number;
+  // A new transfer with everything filled in; every field stays editable.
+  // Ignored when editing.
+  preset?: TransferPreset;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const [fromId, setFromId] = useState<string>(
     initial?.fromAccountId != null
       ? String(initial.fromAccountId)
-      : defaultFromAccountId != null
-        ? String(defaultFromAccountId)
-        : ''
+      : preset
+        ? String(preset.fromAccountId)
+        : defaultFromAccountId != null
+          ? String(defaultFromAccountId)
+          : ''
   );
   const [toId, setToId] = useState<string>(
-    initial?.toAccountId != null ? String(initial.toAccountId) : ''
+    initial?.toAccountId != null ? String(initial.toAccountId) : preset ? String(preset.toAccountId) : ''
   );
-  const [amount, setAmount] = useState(initial ? centsToInput(initial.amountCents) : '');
+  const [amount, setAmount] = useState(
+    initial ? centsToInput(initial.amountCents) : preset ? centsToInput(preset.amountCents) : ''
+  );
   const [fee, setFee] = useState(initial && initial.feeCents > 0 ? centsToInput(initial.feeCents) : '');
   const [date, setDate] = useState(initial?.date ?? todayStr());
   // New transfers default to the current time; edits keep the stored value.
   const [time, setTime] = useState(initial ? initial.time ?? '' : nowTimeHm());
-  const [note, setNote] = useState(initial?.note ?? '');
+  const [note, setNote] = useState(initial?.note ?? preset?.note ?? '');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -107,6 +124,7 @@ export function TransferModal({
   return (
     <Modal title={initial ? 'Edit transfer' : 'Transfer between accounts'} onClose={onClose}>
       <form className="form-grid" onSubmit={submit}>
+        {!initial && preset?.hint && <div className="field-hint">{preset.hint}</div>}
         <div className="form-row">
           <div className="field">
             <label htmlFor="tf-from">From</label>

@@ -16,7 +16,7 @@ import { useAppContext } from '../App';
 import { DebtPayoff } from '../components/DebtPayoff';
 import { confirm, toast } from '../components/feedback';
 import { ForecastChart } from '../components/ForecastChart';
-import { BanknoteIcon, CheckIcon, PencilIcon, PlusIcon, TrashIcon } from '../components/Icons';
+import { BanknoteIcon, CheckIcon, PencilIcon, PlusIcon, TransferIcon, TrashIcon } from '../components/Icons';
 import { LogReceivedModal } from '../components/LogReceivedModal';
 import { MarkPaidModal } from '../components/MarkPaidModal';
 import { Modal } from '../components/Modal';
@@ -27,6 +27,8 @@ import { SavingsGoals } from '../components/SavingsGoals';
 import { ScheduleCalendar } from '../components/ScheduleCalendar';
 import { ScheduleItemModal } from '../components/ScheduleItemModal';
 import type { OutflowKind } from '../components/ScheduleItemModal';
+import { TransferModal } from '../components/TransferModal';
+import type { TransferPreset } from '../components/TransferModal';
 import { centsToInput, cleanError, currentMonth, fmtMoney, ordinal, parseAmountToCents, todayStr } from '../format';
 import {
   addDays,
@@ -46,6 +48,7 @@ import {
   occurrenceKey,
   remainingCount,
   shortDateLabel,
+  shortfallHelp,
   toInput,
   WEEKDAY_LABEL,
   WEEKEND_RULE_LABEL,
@@ -61,6 +64,7 @@ import type {
   PaydayStatus,
   Planner,
   ScheduleContext,
+  ShortfallFix,
 } from '../schedule';
 
 // Paydays shown ahead of the current one; "Show more" adds two at a time.
@@ -121,6 +125,10 @@ export function Schedule() {
   const [funding, setFunding] = useState<ScheduleItem | null>(null);
   const [logging, setLogging] = useState<PaydayOccurrence | null>(null);
   const [paying, setPaying] = useState<ItemOccurrence | null>(null);
+  // Forecast shortfall fixes: a transfer opened already filled in, and the
+  // amount Mark as paid opens with for "pay what's on hand now".
+  const [moving, setMoving] = useState<TransferPreset | null>(null);
+  const [payAmount, setPayAmount] = useState<number | null>(null);
   const [ahead, setAhead] = useState(PLAN_AHEAD);
   // The view lives in the URL (?view=…) so it survives reloads and Back.
   const [params, setParams] = useSearchParams();
@@ -326,9 +334,12 @@ export function Schedule() {
           ) : view === 'forecast' && forecast ? (
             <ForecastView
               forecast={forecast}
-              onPay={(e) =>
-                setPaying({ item: e.item, dueDate: e.dueDate, amountCents: occurrenceAmount(e.item, ctx) })
-              }
+              ctx={ctx}
+              onPay={(e, amountCents) => {
+                setPayAmount(amountCents ?? null);
+                setPaying({ item: e.item, dueDate: e.dueDate, amountCents: occurrenceAmount(e.item, ctx) });
+              }}
+              onMove={setMoving}
             />
           ) : view === 'planner' ? (
             <>
@@ -581,7 +592,20 @@ export function Schedule() {
           status={statusOf(paying)}
           accounts={accounts}
           categories={categories}
-          onClose={() => setPaying(null)}
+          defaultAmountCents={payAmount ?? undefined}
+          onClose={() => {
+            setPaying(null);
+            setPayAmount(null);
+          }}
+          onSaved={afterMutation}
+        />
+      )}
+      {moving && (
+        <TransferModal
+          initial={null}
+          accounts={accounts}
+          preset={moving}
+          onClose={() => setMoving(null)}
           onSaved={afterMutation}
         />
       )}
@@ -602,9 +626,33 @@ export function Schedule() {
  * The 60-day cash projection: headline numbers, the dates you'd come up short,
  * the balance chart, and a day-by-day list (the chart's table view).
  */
-function ForecastView({ forecast, onPay }: { forecast: Forecast; onPay: (e: ForecastEvent) => void }) {
+function ForecastView({
+  forecast,
+  ctx,
+  onPay,
+  onMove,
+}: {
+  forecast: Forecast;
+  ctx: ScheduleContext;
+  onPay: (e: ForecastEvent, amountCents?: number) => void; // amountCents: open with this instead of what's due
+  onMove: (preset: TransferPreset) => void;
+}) {
   const { startCents, cashAccounts, setAside, days, shortfalls, lowest, endCents } = forecast;
   const eventDays = days.filter((d) => d.events.length > 0);
+  const help = shortfallHelp(forecast, ctx);
+  const anyFix = help.some((h) => h.fixes.length > 0);
+  const moveFrom = (e: ForecastEvent, needCents: number, fix: Extract<ShortfallFix, { kind: 'move' }>) =>
+    onMove({
+      fromAccountId: fix.from.id,
+      toAccountId: fix.to.id,
+      amountCents: fix.amountCents,
+      note: `Cover ${e.item.name}`,
+      hint: `${
+        fix.covers
+          ? `Enough to cover ${e.item.name} on ${shortDateLabel(e.date)}${needCents > e.shortCents ? ', including what you are already short before it' : ''}.`
+          : `Everything in ${fix.from.name}. It covers ${fmtMoney(fix.amountCents)} of the ${fmtMoney(needCents)} needed for ${e.item.name} on ${shortDateLabel(e.date)}.`
+      } ${fix.from.name} is where a savings goal puts its money, so that goal moves back by this much.`,
+    });
   return (
     <>
       <div className="panel subs-summary sched-summary">
@@ -645,7 +693,7 @@ function ForecastView({ forecast, onPay }: { forecast: Forecast; onPay: (e: Fore
             Not enough on these dates
           </div>
           <div className="plan-lines">
-            {shortfalls.map((e) => (
+            {help.map(({ event: e, needCents, fixes }) => (
               <div className="fc-short-row" key={occurrenceKey(e.item.id, e.dueDate)}>
                 <div>
                   <strong className="amount-expense">Short {fmtMoney(e.shortCents)}</strong> on{' '}
@@ -654,13 +702,48 @@ function ForecastView({ forecast, onPay }: { forecast: Forecast; onPay: (e: Fore
                 <div className="sub-next-muted">
                   {fmtMoney(Math.max(0, e.balanceBefore))} on hand · {fmtMoney(e.amountCents)} due
                   {e.overdue && ` (overdue since ${shortDateLabel(e.dueDate)})`}
+                  {needCents > e.shortCents && ` · already ${fmtMoney(needCents - e.shortCents)} short before it`}
                 </div>
+                {fixes.length > 0 && (
+                  <div className="fc-fixes">
+                    {fixes.map((fix) =>
+                      fix.kind === 'move' ? (
+                        <button
+                          key="move"
+                          type="button"
+                          className="btn"
+                          title={
+                            fix.covers
+                              ? `Covers this date from ${fix.from.name}`
+                              : `Everything in ${fix.from.name}: ${fmtMoney(fix.amountCents)} of the ${fmtMoney(needCents)} needed`
+                          }
+                          onClick={() => moveFrom(e, needCents, fix)}
+                        >
+                          <TransferIcon /> Move {fmtMoney(fix.amountCents)} from {fix.from.name}
+                        </button>
+                      ) : (
+                        <button
+                          key="partial"
+                          type="button"
+                          className="btn"
+                          title={`Pay what's on hand; ${fmtMoney(fix.restCents)} stays open${
+                            fix.nextPayday ? ` until your ${shortDateLabel(fix.nextPayday)} payday` : ''
+                          }`}
+                          onClick={() => onPay(e, fix.amountCents)}
+                        >
+                          <BanknoteIcon /> Pay {fmtMoney(fix.amountCents)} now
+                        </button>
+                      )
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>
           <div className="field-hint">
-            To cover it: move money in from savings, pay part now and the rest after your next payday, or
-            trim something that's due before it.
+            {anyFix
+              ? "Moving money in from savings covers a date right away. Paying part now leaves the rest open until your next payday. You can also trim something that's due before it."
+              : "To cover it: move money in from savings, pay part now and the rest after your next payday, or trim something that's due before it."}
           </div>
         </div>
       ) : (
