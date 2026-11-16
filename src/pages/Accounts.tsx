@@ -5,6 +5,7 @@ import { archivedOnLabel, isArchived } from '../accounts';
 import { api } from '../api';
 import { confirm, toast } from '../components/feedback';
 import { AccountEditModal } from '../components/AccountEditModal';
+import { CreditUsage } from '../components/CreditUsage';
 import { DueTag } from '../components/DueTag';
 import { PencilIcon, PlusIcon, TransferIcon, TrashIcon } from '../components/Icons';
 import { NetWorthChart } from '../components/NetWorthChart';
@@ -336,6 +337,9 @@ export function Accounts({
                             <div className="due-line">
                               <DueTag dueDay={a.dueDay} dueDay2={a.dueDay2} />
                             </div>
+                          )}
+                          {a.type === 'credit' && a.creditLimitCents !== null && (
+                            <CreditUsage balanceCents={a.balanceCents} limitCents={a.creditLimitCents} compact />
                           )}
                         </td>
                         <td className={`num ${a.balanceCents < 0 ? 'amount-expense' : 'amount-income'}`}>

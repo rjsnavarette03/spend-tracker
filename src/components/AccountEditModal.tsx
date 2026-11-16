@@ -62,6 +62,15 @@ export function AccountEditModal({
   const [dueDay2, setDueDay2] = useState<string>(
     initial?.dueDay2 != null ? String(initial.dueDay2) : ''
   );
+  // Card details (credit only): the limit and the statement closing day.
+  const [limit, setLimit] = useState(initial?.creditLimitCents ? centsToInput(initial.creditLimitCents) : '');
+  const [statementDay, setStatementDay] = useState<string>(
+    initial?.statementDay != null ? String(initial.statementDay) : ''
+  );
+  // Interest (credit and loan), typed per year or per month and stored per
+  // year in basis points. An existing rate opens per year.
+  const [rate, setRate] = useState(initial?.interestRateBp ? String(initial.interestRateBp / 100) : '');
+  const [rateUnit, setRateUnit] = useState<'year' | 'month'>('year');
   // New-loan extras: optionally deposit the borrowed amount into a debit
   // account, with an optional transaction fee. Total owed = amount + fee;
   // only the amount reaches the destination (the fee never does).
@@ -124,6 +133,31 @@ export function AccountEditModal({
     // No second day without a first (the server normalizes this too).
     const dueDay2ToSave =
       dueDayToSave !== null && dueDay2 !== '' && dueDay2 !== dueDay ? Number(dueDay2) : null;
+    let creditLimitCents: number | null = null;
+    if (type === 'credit' && limit.trim() !== '') {
+      creditLimitCents = parseAmountToCents(limit);
+      if (creditLimitCents === null) {
+        setError('Enter the credit limit as a positive amount, or leave it empty');
+        return;
+      }
+    }
+    let interestRateBp: number | null = null;
+    if (type !== 'debit' && rate.trim() !== '') {
+      const pct = Number(rate.replace(/[%\s,]/g, ''));
+      const yearly = Math.round(pct * 100) * (rateUnit === 'month' ? 12 : 1);
+      if (!Number.isFinite(pct) || pct < 0 || yearly > 100000) {
+        setError('Enter the interest rate as a percentage, e.g. 3 or 24.5, or leave it empty');
+        return;
+      }
+      interestRateBp = yearly === 0 ? null : yearly;
+    }
+    const details = {
+      dueDay: dueDayToSave,
+      dueDay2: dueDay2ToSave,
+      creditLimitCents,
+      statementDay: type === 'credit' && statementDay !== '' ? Number(statementDay) : null,
+      interestRateBp,
+    };
     setSaving(true);
     try {
       if (initial) {
@@ -131,8 +165,7 @@ export function AccountEditModal({
           name: name.trim(),
           color,
           image: imageToSave,
-          dueDay: dueDayToSave,
-          dueDay2: dueDay2ToSave,
+          ...details,
           openingBalanceCents: openingCents,
         });
       } else if (isNewLoan && destId) {
@@ -144,8 +177,7 @@ export function AccountEditModal({
           type,
           color,
           image: imageToSave,
-          dueDay: dueDayToSave,
-          dueDay2: dueDay2ToSave,
+          ...details,
           openingBalanceCents: 0,
         });
         try {
@@ -173,8 +205,7 @@ export function AccountEditModal({
           type,
           color,
           image: imageToSave,
-          dueDay: dueDayToSave,
-          dueDay2: dueDay2ToSave,
+          ...details,
           // A fee on an untracked payout still counts toward the debt.
           openingBalanceCents: isNewLoan ? loanAmount + feeCents : openingCents,
         });
@@ -280,6 +311,62 @@ export function AccountEditModal({
             </select>
             <div className="field-hint">
               For twice-a-month plans — the accounts list always shows whichever payment is next.
+            </div>
+          </div>
+        )}
+
+        {type === 'credit' && (
+          <div className="form-row">
+            <div className="field">
+              <label htmlFor="acc-limit">Credit limit (optional)</label>
+              <MoneyInput id="acc-limit" value={limit} onChange={setLimit} />
+              <div className="field-hint">Shows how much of the card is used and what's left.</div>
+            </div>
+            <div className="field">
+              <label htmlFor="acc-statement-day">Statement closes (optional)</label>
+              <select
+                id="acc-statement-day"
+                value={statementDay}
+                onChange={(e) => setStatementDay(e.target.value)}
+              >
+                <option value="">Not set</option>
+                {DUE_DAYS.map((d) => (
+                  <option key={d} value={d}>
+                    {ordinal(d)} of every month
+                  </option>
+                ))}
+              </select>
+              <div className="field-hint">Purchases after this day go on the next statement.</div>
+            </div>
+          </div>
+        )}
+
+        {type !== 'debit' && (
+          <div className="field">
+            <label htmlFor="acc-rate">Interest rate (optional)</label>
+            <div className="rate-input">
+              <input
+                id="acc-rate"
+                type="text"
+                inputMode="decimal"
+                value={rate}
+                placeholder="e.g. 3"
+                onChange={(e) => setRate(e.target.value.replace(/[^0-9.]/g, ''))}
+                maxLength={8}
+              />
+              <select
+                aria-label="Interest rate period"
+                value={rateUnit}
+                onChange={(e) => setRateUnit(e.target.value as 'year' | 'month')}
+              >
+                <option value="year">% a year</option>
+                <option value="month">% a month</option>
+              </select>
+            </div>
+            <div className="field-hint">
+              {type === 'credit'
+                ? 'What the card charges on a balance you carry. Used to estimate interest in Schedule → Progress.'
+                : 'Only if interest is charged on what you still owe. Leave empty when your installments already include it, as most installment loans do.'}
             </div>
           </div>
         )}

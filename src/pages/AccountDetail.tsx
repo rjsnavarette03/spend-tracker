@@ -6,6 +6,7 @@ import { api } from '../api';
 import { useAppContext } from '../App';
 import { AccountEditModal } from '../components/AccountEditModal';
 import { BorrowModal } from '../components/BorrowModal';
+import { CreditUsage } from '../components/CreditUsage';
 import { DueTag } from '../components/DueTag';
 import { PayModal } from '../components/PayModal';
 import { TransactionModal } from '../components/TransactionModal';
@@ -21,7 +22,7 @@ import {
   TransferIcon,
   TrashIcon,
 } from '../components/Icons';
-import { cleanError, dateLabel, fmtMoney, timeLabel } from '../format';
+import { cleanError, dateLabel, fmtMoney, fmtRate, nextMonthlyDate, ordinal, timeLabel } from '../format';
 import { confirm, toast } from '../components/feedback';
 import { usePagedTable } from '../usePagedTable';
 import type { SortOption } from '../usePagedTable';
@@ -456,6 +457,23 @@ export function AccountDetail() {
         {account.dueDay != null && negative && (
           <span className="due-line">
             <DueTag dueDay={account.dueDay} dueDay2={account.dueDay2} />
+          </span>
+        )}
+        {account.type === 'credit' && account.creditLimitCents !== null && (
+          <CreditUsage balanceCents={account.balanceCents} limitCents={account.creditLimitCents} />
+        )}
+        {(account.statementDay !== null || account.interestRateBp !== null) && (
+          <span className="account-terms">
+            {account.statementDay !== null && (
+              <span title={`The statement closes on the ${ordinal(account.statementDay)} of every month`}>
+                Statement closes {nextMonthlyDate(account.statementDay).label}
+              </span>
+            )}
+            {account.interestRateBp !== null && (
+              <span>
+                Interest {fmtRate(account.interestRateBp)} a year ({fmtRate(Math.round(account.interestRateBp / 12))} a month)
+              </span>
+            )}
           </span>
         )}
       </div>

@@ -112,6 +112,11 @@ POST /auth/delete-account         { currentPassword } (auth even if unverified;
 GET  /categories                        POST /categories            { name, type, color }
 PUT  /categories/:id  { name, color }   DELETE /categories/:id
 GET  /accounts                          POST /accounts  PUT/DELETE /accounts/:id
+     (AccountInput. Optional card/loan details: creditLimitCents + statementDay
+      (1–31) on credit cards only, interestRateBp (yearly rate in basis points,
+      3600 = 36%; 0 is stored as null) on credit and loan accounts — 422 on the
+      wrong type. On PUT a key left out of the body keeps the stored value, so
+      an older client can't wipe them; null clears.)
 POST /accounts/:id/archive → { archivedAt, pausedItems }   POST /accounts/:id/restore
      (archive = hide a SETTLED account — balance exactly 0, else 422; also 422
       while an active subscription charges it — from lists/pickers, history

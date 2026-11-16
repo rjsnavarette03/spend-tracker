@@ -30,6 +30,9 @@ CREATE TABLE IF NOT EXISTS accounts (
     -- normalizes so due_day is always the earlier/only day.
     due_day INTEGER NULL,
     due_day2 INTEGER NULL,
+    credit_limit_cents INTEGER NULL,
+    statement_day INTEGER NULL,
+    interest_rate_bp INTEGER NULL,
     opening_balance_cents INTEGER NOT NULL DEFAULT 0,
     -- Archived settled account (see MySQL schema); NULL = active.
     archived_at TEXT NULL,

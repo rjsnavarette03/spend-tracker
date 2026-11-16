@@ -1,4 +1,5 @@
 import type {
+  AccountInput,
   AccountType,
   Api,
   AuthResponse,
@@ -168,26 +169,8 @@ export const api: Api = {
   },
   accounts: {
     list: () => http('GET', '/accounts'),
-    create: (data: {
-      name: string;
-      type: AccountType;
-      color: string;
-      image: string | null;
-      dueDay: number | null;
-      dueDay2: number | null;
-      openingBalanceCents: number;
-    }) => http('POST', '/accounts', data),
-    update: (
-      id: number,
-      data: {
-        name: string;
-        color: string;
-        image: string | null;
-        dueDay: number | null;
-        dueDay2: number | null;
-        openingBalanceCents: number;
-      }
-    ) => http('PUT', `/accounts/${id}`, data),
+    create: (data: AccountInput & { type: AccountType }) => http('POST', '/accounts', data),
+    update: (id: number, data: AccountInput) => http('PUT', `/accounts/${id}`, data),
     remove: (id: number) => http('DELETE', `/accounts/${id}`),
     archive: (id: number) => http('POST', `/accounts/${id}/archive`),
     restore: async (id: number) => {

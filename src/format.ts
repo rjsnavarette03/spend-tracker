@@ -414,6 +414,37 @@ export function nextDueInfo(dueDay: number, dueDay2?: number | null): { days: nu
   return { days, label };
 }
 
+/** The next time day-of-month `day` comes around (today counts; 29–31 clamp in short months). */
+export function nextMonthlyDate(day: number): { days: number; label: string } {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const clamped = (y: number, m: number) => Math.min(day, new Date(y, m + 1, 0).getDate());
+  let next = new Date(today.getFullYear(), today.getMonth(), clamped(today.getFullYear(), today.getMonth()));
+  if (next < today) {
+    const y = today.getMonth() === 11 ? today.getFullYear() + 1 : today.getFullYear();
+    const m = (today.getMonth() + 1) % 12;
+    next = new Date(y, m, clamped(y, m));
+  }
+  const days = Math.round((next.getTime() - today.getTime()) / 86400000);
+  const label =
+    days === 0 ? 'today' : days === 1 ? 'tomorrow' : next.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return { days, label };
+}
+
+/** Basis points as a percentage: 3600 -> "36%", 2450 -> "24.5%", 275 -> "2.75%". */
+export function fmtRate(bp: number): string {
+  return `${Number((bp / 100).toFixed(2))}%`;
+}
+
+/**
+ * How much of a card's limit is in use: what's owed over the limit, as a
+ * whole percentage (rounded up, so any debt shows as at least 1%).
+ */
+export function creditUsage(balanceCents: number, limitCents: number): { owedCents: number; availableCents: number; pct: number } {
+  const owedCents = Math.max(0, -balanceCents);
+  return { owedCents, availableCents: limitCents - owedCents, pct: Math.ceil((owedCents / limitCents) * 100) };
+}
+
 export function cleanError(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }

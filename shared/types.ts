@@ -48,6 +48,14 @@ export interface Account {
   // so dueDay is always the earlier/only day.
   dueDay: number | null;
   dueDay2: number | null;
+  // Credit cards: the card's limit and the day of the month its statement
+  // closes; null = not set.
+  creditLimitCents: number | null;
+  statementDay: number | null;
+  // Credit cards and loans: yearly interest rate in basis points (3600 = 36%
+  // a year), charged on what's still owed. null = none — the right setting
+  // for installments that already include their interest.
+  interestRateBp: number | null;
   openingBalanceCents: number;
   balanceCents: number;
   // When a settled account was archived ('YYYY-MM-DD HH:MM:SS', server time);
@@ -57,6 +65,22 @@ export interface Account {
   archivedAt: string | null;
   txCount: number;
   transferCount: number;
+}
+
+// What the account form saves. Type is chosen at creation and never changes.
+// creditLimitCents/statementDay are credit-only and interestRateBp is for
+// credit and loan accounts (422 otherwise); on update, a field left out of
+// the body keeps its stored value.
+export interface AccountInput {
+  name: string;
+  color: string;
+  image: string | null;
+  dueDay: number | null;
+  dueDay2: number | null;
+  creditLimitCents: number | null;
+  statementDay: number | null;
+  interestRateBp: number | null;
+  openingBalanceCents: number;
 }
 
 export interface Transfer {
@@ -389,26 +413,8 @@ export interface Api {
   };
   accounts: {
     list(): Promise<Account[]>;
-    create(data: {
-      name: string;
-      type: AccountType;
-      color: string;
-      image: string | null;
-      dueDay: number | null;
-      dueDay2: number | null;
-      openingBalanceCents: number;
-    }): Promise<Account>;
-    update(
-      id: number,
-      data: {
-        name: string;
-        color: string;
-        image: string | null;
-        dueDay: number | null;
-        dueDay2: number | null;
-        openingBalanceCents: number;
-      }
-    ): Promise<void>;
+    create(data: AccountInput & { type: AccountType }): Promise<Account>;
+    update(id: number, data: AccountInput): Promise<void>;
     remove(id: number): Promise<void>;
     // Settled accounts only (balance 0; 422 otherwise, or while a subscription
     // charges it). Pauses schedule items that pay into it and names them.

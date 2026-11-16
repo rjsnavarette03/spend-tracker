@@ -2438,6 +2438,65 @@ if (!REMINDERS_CRON) {
   }
 }
 
+// ---------- accounts: credit limit, statement day, interest rate ----------
+{
+  const base = { color: '#f87171', image: null, dueDay: null, dueDay2: null, openingBalanceCents: 36000 };
+  const find = async (id) => (await a.call('GET', '/accounts')).data.find((x) => x.id === id);
+  const terms = (x) => [x?.creditLimitCents, x?.statementDay, x?.interestRateBp].join();
+
+  const card = await a.call('POST', '/accounts', {
+    ...base, name: 'Terms Card', type: 'credit', creditLimitCents: 5000000, statementDay: 20, interestRateBp: 3600,
+  });
+  check('credit card stores its limit, statement day and rate',
+    card.status === 201 && terms(card.data) === '5000000,20,3600', JSON.stringify(card.data));
+  check('GET /accounts returns them', terms(await find(card.data.id)) === '5000000,20,3600');
+
+  const plain = await a.call('POST', '/accounts', { ...base, name: 'Terms Plain', type: 'credit' });
+  check('an account created without them has none', plain.status === 201 && terms(plain.data) === ',,', JSON.stringify(plain.data));
+  check('GET /accounts returns nulls, not missing keys',
+    JSON.stringify((({ creditLimitCents, statementDay, interestRateBp }) => ({ creditLimitCents, statementDay, interestRateBp }))(await find(plain.data.id)))
+      === '{"creditLimitCents":null,"statementDay":null,"interestRateBp":null}');
+
+  const loan = await a.call('POST', '/accounts', { ...base, name: 'Terms Loan', type: 'loan', interestRateBp: 1250 });
+  check('a loan takes an interest rate', loan.status === 201 && terms(loan.data) === ',,1250', JSON.stringify(loan.data));
+  const zero = await a.call('POST', '/accounts', { ...base, name: 'Terms Zero', type: 'loan', interestRateBp: 0 });
+  check('a 0% rate is stored as none', zero.status === 201 && zero.data.interestRateBp === null, JSON.stringify(zero.data));
+
+  const rejected = async (label, body) => {
+    const r = await a.call('POST', '/accounts', { ...base, name: 'Terms Bad', type: 'credit', ...body });
+    check(`${label} -> 422`, r.status === 422, `got ${r.status} ${JSON.stringify(r.data)}`);
+    if (r.status === 201) await a.call('DELETE', `/accounts/${r.data.id}`);
+  };
+  await rejected('a credit limit on a loan', { type: 'loan', creditLimitCents: 100000 });
+  await rejected('a statement day on a loan', { type: 'loan', statementDay: 5 });
+  await rejected('a credit limit on a debit account', { type: 'debit', creditLimitCents: 100000 });
+  await rejected('an interest rate on a debit account', { type: 'debit', interestRateBp: 500 });
+  await rejected('statement day 0', { statementDay: 0 });
+  await rejected('statement day 32', { statementDay: 32 });
+  await rejected('a zero credit limit', { creditLimitCents: 0 });
+  await rejected('a negative credit limit', { creditLimitCents: -5 });
+  await rejected('a fractional credit limit', { creditLimitCents: 12.5 });
+  await rejected('a negative interest rate', { interestRateBp: -1 });
+  await rejected('an interest rate above 1000%', { interestRateBp: 100001 });
+  await rejected('a fractional interest rate', { interestRateBp: 12.5 });
+
+  // Update: a key left out keeps the stored value (an older client can't wipe
+  // it), null clears it, a value replaces it.
+  const upd = { name: 'Terms Card', color: '#f87171', image: null, dueDay: null, dueDay2: null, openingBalanceCents: 36000 };
+  const keep = await a.call('PUT', `/accounts/${card.data.id}`, upd);
+  check('update without the keys keeps them', keep.status === 200 && terms(await find(card.data.id)) === '5000000,20,3600');
+  await a.call('PUT', `/accounts/${card.data.id}`, { ...upd, creditLimitCents: 7500000, statementDay: null, interestRateBp: 4200 });
+  check('update replaces values and null clears one', terms(await find(card.data.id)) === '7500000,,4200', terms(await find(card.data.id)));
+  const badUpd = await a.call('PUT', `/accounts/${loan.data.id}`, { ...upd, name: 'Terms Loan', statementDay: 9 });
+  check('update: a statement day on a loan -> 422', badUpd.status === 422, `got ${badUpd.status}`);
+  check('the rejected update changed nothing', terms(await find(loan.data.id)) === ',,1250');
+
+  const foreign = await b.call('PUT', `/accounts/${card.data.id}`, { ...upd, creditLimitCents: 1 });
+  check("another user can't change them", foreign.status === 404 && terms(await find(card.data.id)) === '7500000,,4200', `got ${foreign.status}`);
+
+  for (const x of [card, plain, loan, zero]) await a.call('DELETE', `/accounts/${x.data.id}`);
+}
+
 // ---------- net worth history (GET /reports/networth) ----------
 {
   // YYYY-MM `back` months before this one (negative = ahead). Like the budget

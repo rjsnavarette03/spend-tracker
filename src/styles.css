@@ -3023,6 +3023,55 @@ select {
   font-size: 13.5px;
 }
 
+/* Credit card limit in use: bar + figures (accounts list and account page). */
+.credit-usage {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 8px;
+  max-width: 420px;
+}
+
+.credit-usage-text {
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
+.credit-usage-compact {
+  margin-top: 6px;
+  max-width: 220px;
+}
+
+.credit-usage-compact .credit-usage-text {
+  font-size: 11.5px;
+}
+
+/* Statement day and interest rate under an account's balance. */
+.account-terms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
+/* Interest rate: the number and its "% a year / % a month" unit on one line. */
+.rate-input {
+  display: flex;
+  gap: 8px;
+}
+
+.rate-input input {
+  flex: 1;
+  min-width: 0;
+}
+
+.rate-input select {
+  flex: 0 0 auto;
+  width: auto;
+}
+
 /* Net worth over time (Accounts): the change since the first point. */
 .nw-panel {
   margin-bottom: 14px;

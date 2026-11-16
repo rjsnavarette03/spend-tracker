@@ -267,6 +267,20 @@ final class DB
         if (!self::columnExists('accounts', 'archived_at')) {
             self::tryDdl('ALTER TABLE accounts ADD COLUMN archived_at ' . ($driver === 'sqlite' ? 'TEXT NULL' : 'DATETIME NULL'));
         }
+
+        // Step 13: card and loan details on accounts — a card's credit limit
+        // and statement closing day, and a yearly interest rate in basis
+        // points for cards and loans. All NULL (unset) on existing accounts.
+        $accountCols = [
+            'credit_limit_cents' => ['INTEGER NULL', 'BIGINT NULL'],
+            'statement_day' => ['INTEGER NULL', 'TINYINT NULL'],
+            'interest_rate_bp' => ['INTEGER NULL', 'INT NULL'],
+        ];
+        foreach ($accountCols as $name => [$sqliteType, $mysqlType]) {
+            if (!self::columnExists('accounts', $name)) {
+                self::tryDdl("ALTER TABLE accounts ADD COLUMN $name " . ($driver === 'sqlite' ? $sqliteType : $mysqlType));
+            }
+        }
     }
 
     /**

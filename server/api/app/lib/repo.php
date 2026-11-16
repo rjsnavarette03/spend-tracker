@@ -290,6 +290,8 @@ final class Repo
         $rows = DB::all(
             "SELECT a.id, a.name, a.type, a.color, a.image,
                     a.due_day AS dueDay, a.due_day2 AS dueDay2,
+                    a.credit_limit_cents AS creditLimitCents, a.statement_day AS statementDay,
+                    a.interest_rate_bp AS interestRateBp,
                     a.opening_balance_cents AS openingBalanceCents,
                     " . self::BALANCE_SQL . " AS balanceCents,
                     a.archived_at AS archivedAt,
@@ -309,6 +311,9 @@ final class Repo
             'image' => $r['image'] === null ? null : (string)$r['image'],
             'dueDay' => $r['dueDay'] === null ? null : (int)$r['dueDay'],
             'dueDay2' => $r['dueDay2'] === null ? null : (int)$r['dueDay2'],
+            'creditLimitCents' => $r['creditLimitCents'] === null ? null : (int)$r['creditLimitCents'],
+            'statementDay' => $r['statementDay'] === null ? null : (int)$r['statementDay'],
+            'interestRateBp' => $r['interestRateBp'] === null ? null : (int)$r['interestRateBp'],
             'openingBalanceCents' => (int)$r['openingBalanceCents'],
             'balanceCents' => (int)$r['balanceCents'],
             'archivedAt' => $r['archivedAt'] === null ? null : (string)$r['archivedAt'],
@@ -353,18 +358,54 @@ final class Repo
         return [$days[0] ?? null, $days[1] ?? null];
     }
 
-    /** @return array<string, mixed> */
-    public static function createAccount(int $uid, mixed $name, mixed $type, mixed $color, mixed $openingBalanceCents, mixed $image = null, mixed $dueDay = null, mixed $dueDay2 = null): array
+    /**
+     * The optional card/loan details, validated for the account type:
+     *   credit limit + statement closing day — credit cards only
+     *   yearly interest rate (basis points)  — credit cards and loans
+     * A key that's absent from the body keeps $current's value, so a client
+     * that doesn't know a field can't wipe it; null clears it.
+     *
+     * @param array<string, mixed> $b request body
+     * @param array<string, mixed> $current column => value of the row being updated ([] when creating)
+     * @return array{credit_limit_cents: ?int, statement_day: ?int, interest_rate_bp: ?int}
+     */
+    private static function accountTermsFor(string $type, array $b, array $current): array
     {
-        $name = Validate::name($name);
-        $type = Validate::accountType($type);
-        $color = Validate::color($color);
-        $image = Validate::accountImage($image);
-        [$dueDay, $dueDay2] = self::dueDaysFor($type, $dueDay, $dueDay2);
-        $opening = self::signedOpening($type, $openingBalanceCents);
+        $pick = static fn(string $key, string $col): mixed
+            => array_key_exists($key, $b) ? $b[$key] : ($current[$col] ?? null);
+        $limit = Validate::amountCentsOrNull($pick('creditLimitCents', 'credit_limit_cents'));
+        $statementDay = Validate::statementDayOrNull($pick('statementDay', 'statement_day'));
+        $rate = Validate::interestRateBpOrNull($pick('interestRateBp', 'interest_rate_bp'));
+        if ($type !== 'credit' && ($limit !== null || $statementDay !== null)) {
+            throw new ApiError('A credit limit and statement day only apply to credit cards', 422);
+        }
+        if ($type === 'debit' && $rate !== null) {
+            throw new ApiError('An interest rate only applies to credit and loan accounts', 422);
+        }
+        return ['credit_limit_cents' => $limit, 'statement_day' => $statementDay, 'interest_rate_bp' => $rate];
+    }
+
+    /**
+     * @param array<string, mixed> $b request body
+     * @return array<string, mixed>
+     */
+    public static function createAccount(int $uid, array $b): array
+    {
+        $name = Validate::name($b['name'] ?? null);
+        $type = Validate::accountType($b['type'] ?? null);
+        $color = Validate::color($b['color'] ?? null);
+        $image = Validate::accountImage($b['image'] ?? null);
+        [$dueDay, $dueDay2] = self::dueDaysFor($type, $b['dueDay'] ?? null, $b['dueDay2'] ?? null);
+        $terms = self::accountTermsFor($type, $b, []);
+        $opening = self::signedOpening($type, $b['openingBalanceCents'] ?? 0);
         $id = DB::insert(
-            'INSERT INTO accounts (user_id, name, type, color, image, due_day, due_day2, opening_balance_cents) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-            [$uid, $name, $type, $color, $image, $dueDay, $dueDay2, $opening]
+            'INSERT INTO accounts (user_id, name, type, color, image, due_day, due_day2,
+                                   credit_limit_cents, statement_day, interest_rate_bp, opening_balance_cents)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [
+                $uid, $name, $type, $color, $image, $dueDay, $dueDay2,
+                $terms['credit_limit_cents'], $terms['statement_day'], $terms['interest_rate_bp'], $opening,
+            ]
         );
         return [
             'id' => $id,
@@ -374,6 +415,9 @@ final class Repo
             'image' => $image,
             'dueDay' => $dueDay,
             'dueDay2' => $dueDay2,
+            'creditLimitCents' => $terms['credit_limit_cents'],
+            'statementDay' => $terms['statement_day'],
+            'interestRateBp' => $terms['interest_rate_bp'],
             'openingBalanceCents' => $opening,
             'balanceCents' => $opening,
             'archivedAt' => null,
@@ -382,22 +426,39 @@ final class Repo
         ];
     }
 
-    /** Type is immutable after creation (changing it would re-interpret history). */
-    public static function updateAccount(int $uid, int $id, mixed $name, mixed $color, mixed $openingBalanceCents, mixed $image = null, mixed $dueDay = null, mixed $dueDay2 = null): void
+    /**
+     * Type is immutable after creation (changing it would re-interpret history).
+     * @param array<string, mixed> $b request body
+     */
+    public static function updateAccount(int $uid, int $id, array $b): void
     {
-        $name = Validate::name($name);
-        $color = Validate::color($color);
-        $image = Validate::accountImage($image);
+        $name = Validate::name($b['name'] ?? null);
+        $color = Validate::color($b['color'] ?? null);
+        $image = Validate::accountImage($b['image'] ?? null);
         // Sign the opening balance using the account's existing (immutable) type.
-        $existing = DB::one('SELECT type FROM accounts WHERE id = ? AND user_id = ?', [$id, $uid]);
+        $existing = DB::one(
+            'SELECT type, credit_limit_cents, statement_day, interest_rate_bp FROM accounts WHERE id = ? AND user_id = ?',
+            [$id, $uid]
+        );
         if ($existing === null) {
             throw new ApiError('Account not found', 404);
         }
-        [$dueDay, $dueDay2] = self::dueDaysFor((string)$existing['type'], $dueDay, $dueDay2);
-        $opening = self::signedOpening((string)$existing['type'], $openingBalanceCents);
+        $type = (string)$existing['type'];
+        [$dueDay, $dueDay2] = self::dueDaysFor($type, $b['dueDay'] ?? null, $b['dueDay2'] ?? null);
+        $terms = self::accountTermsFor($type, $b, [
+            'credit_limit_cents' => $existing['credit_limit_cents'] === null ? null : (int)$existing['credit_limit_cents'],
+            'statement_day' => $existing['statement_day'] === null ? null : (int)$existing['statement_day'],
+            'interest_rate_bp' => $existing['interest_rate_bp'] === null ? null : (int)$existing['interest_rate_bp'],
+        ]);
+        $opening = self::signedOpening($type, $b['openingBalanceCents'] ?? 0);
         DB::exec(
-            'UPDATE accounts SET name = ?, color = ?, image = ?, due_day = ?, due_day2 = ?, opening_balance_cents = ? WHERE id = ? AND user_id = ?',
-            [$name, $color, $image, $dueDay, $dueDay2, $opening, $id, $uid]
+            'UPDATE accounts SET name = ?, color = ?, image = ?, due_day = ?, due_day2 = ?,
+                                 credit_limit_cents = ?, statement_day = ?, interest_rate_bp = ?, opening_balance_cents = ?
+             WHERE id = ? AND user_id = ?',
+            [
+                $name, $color, $image, $dueDay, $dueDay2,
+                $terms['credit_limit_cents'], $terms['statement_day'], $terms['interest_rate_bp'], $opening, $id, $uid,
+            ]
         );
     }
 

@@ -40,6 +40,12 @@ CREATE TABLE IF NOT EXISTS accounts (
     -- normalizes so due_day is always the earlier/only day.
     due_day TINYINT NULL,
     due_day2 TINYINT NULL,
+    -- Credit cards: the limit and the day of the month the statement closes.
+    -- Cards and loans: yearly interest rate in basis points (3600 = 36%),
+    -- NULL = none (installments that already include their interest).
+    credit_limit_cents BIGINT NULL,
+    statement_day TINYINT NULL,
+    interest_rate_bp INT NULL,
     opening_balance_cents BIGINT NOT NULL DEFAULT 0,
     -- Set when a settled (balance 0) account is archived: hidden from the
     -- account lists and pickers, history untouched. Any new transaction or

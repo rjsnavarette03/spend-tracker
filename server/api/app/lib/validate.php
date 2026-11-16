@@ -151,6 +151,51 @@ final class Validate
         return $v;
     }
 
+    /** Statement closing day for credit cards: null or 1–31. */
+    public static function statementDayOrNull(mixed $v): ?int
+    {
+        if ($v === null || $v === '') {
+            return null;
+        }
+        if (is_string($v) && ctype_digit($v)) {
+            $v = (int)$v;
+        }
+        if (is_float($v) && floor($v) === $v) {
+            $v = (int)$v;
+        }
+        if (!is_int($v) || $v < 1 || $v > 31) {
+            throw new ApiError('Statement day must be between 1 and 31', 422);
+        }
+        return $v;
+    }
+
+    /** Optional positive amount in cents (a credit limit): null/'' -> null. */
+    public static function amountCentsOrNull(mixed $v): ?int
+    {
+        if ($v === null || $v === '') {
+            return null;
+        }
+        return self::amountCents($v);
+    }
+
+    /**
+     * Yearly interest rate in basis points (3600 = 36% a year): null, '' and 0
+     * all mean "no interest" and are stored as null. Capped at 1000% a year.
+     */
+    public static function interestRateBpOrNull(mixed $v): ?int
+    {
+        if ($v === null || $v === '') {
+            return null;
+        }
+        if (is_float($v) && floor($v) === $v) {
+            $v = (int)$v;
+        }
+        if (!is_int($v) || $v < 0 || $v > 100000) {
+            throw new ApiError('Interest rate must be between 0% and 1000% a year', 422);
+        }
+        return $v === 0 ? null : $v;
+    }
+
     /** Budget cadence: the recurring period a budget amount applies to. */
     public static function cadence(mixed $c): string
     {
