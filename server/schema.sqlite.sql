@@ -80,6 +80,8 @@ CREATE TABLE IF NOT EXISTS budgets (
     category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
     cadence TEXT NOT NULL DEFAULT 'month' CHECK (cadence IN ('week','month','year')),
     amount_cents INTEGER NOT NULL,
+    rollover INTEGER NOT NULL DEFAULT 0,
+    rollover_from TEXT NULL,
     UNIQUE (category_id)
 );
 

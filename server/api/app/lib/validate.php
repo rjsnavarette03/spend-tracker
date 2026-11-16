@@ -196,6 +196,15 @@ final class Validate
         return $v === 0 ? null : $v;
     }
 
+    /** A JSON true/false switch (no truthy strings or numbers). */
+    public static function boolean(mixed $v, string $what = 'Value'): bool
+    {
+        if (!is_bool($v)) {
+            throw new ApiError("$what must be true or false", 422);
+        }
+        return $v;
+    }
+
     /** Budget cadence: the recurring period a budget amount applies to. */
     public static function cadence(mixed $c): string
     {

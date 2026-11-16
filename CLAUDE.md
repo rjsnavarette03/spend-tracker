@@ -134,8 +134,19 @@ PUT  /transfers/:id                      DELETE /transfers/:id
       only amount reaches the target; deleting an account NULLs its side.
       toAccountId may be null ONLY when the source is a loan — an undeposited
       "Borrow again" that grows the debt but lands nowhere)
-GET  /budgets                           PUT /budgets { categoryId, cadence, amountCents }  (0 deletes)
-     (budgets are recurring per-category rules; cadence = week|month|year)
+GET  /budgets                           PUT /budgets { categoryId, cadence, amountCents, rollover?, rolloverFrom? }  (0 deletes)
+     (budgets are recurring per-category rules; cadence = week|month|year.
+      Rollover: rows carry `rollover` + `carryCents`, and the limit this period
+      is amountCents + carryCents (`budgetLimit` in format.ts — Budgets page,
+      Dashboard widget, the assistant's snapshot). Each completed period since
+      `budgets.rollover_from` leaves max(0, carry + amount − spent): unused money
+      rolls forward, overspending uses up the carry but never goes negative.
+      Never stored — `Repo::rolloverCarry` folds the ledger on every read, at the
+      budget's CURRENT amount. rollover_from = first day of the current period
+      when switched on or when the cadence changes, kept while it stays on; an
+      absent `rollover` key keeps the budget's setting. `rolloverFrom` (a date,
+      ≤ 5 years back, not future; snapped to its period start) backdates the
+      count — the API suite uses it, the UI doesn't offer it.)
 GET  /subscriptions                     POST /subscriptions  (SubscriptionInput)
 PUT  /subscriptions/:id                 DELETE /subscriptions/:id
      (recurring auto-charges: cycle = monthly [bill_day derives from nextDate,
@@ -192,7 +203,7 @@ GET  /reports/networth?months=12 → [{ month, assetsCents, liabilitiesCents, ne
 
 ### Gotchas
 - **`config.php` is gitignored and required** — the API returns 500 ("Server not configured") without it. Always `cp config.sample.php config.php` per environment. `assemble` never creates it (so DB creds can't be committed) and redeploys must never overwrite it.
-- **DB auto-migration**: `DB::ensureSchema` probes the newest table (`reminder_sends`); if missing it re-runs the full `CREATE ... IF NOT EXISTS` schema (idempotent, preserves data — this is how a new table lands on an existing DB). **When you add a table: add it to both schema files AND update the probe table name in `db.php`.** The schema files must be saved WITHOUT a UTF-8 BOM (PowerShell `Set-Content -Encoding utf8` adds one; SQLite tolerates it but MySQL rejects the first statement) — the loader now strips a leading BOM defensively, but don't rely on it. Schema *changes* to existing tables can't ride the replay (CREATE IF NOT EXISTS won't alter) — add an idempotent, self-healing migration step instead (see `migrateBudgetsToCadence`: MySQL does in-place guarded ALTERs keyed off the final index; SQLite rebuilds the table since it can't drop a column inside a UNIQUE constraint). New *columns* on existing tables get a guarded `columnExists`-then-`ALTER` step (e.g. `users.email_verified`, added `DEFAULT 1` so pre-existing rows stay verified; `schedule_items.goal_milestones`, nullable; the four `users.reminder_*`/`timezone` columns, step 11, `reminder_emails` DEFAULT 0 so nobody is opted in; `accounts.archived_at`, step 12, nullable DATETIME — not TIMESTAMP, which MySQL can auto-fill).
+- **DB auto-migration**: `DB::ensureSchema` probes the newest table (`reminder_sends`); if missing it re-runs the full `CREATE ... IF NOT EXISTS` schema (idempotent, preserves data — this is how a new table lands on an existing DB). **When you add a table: add it to both schema files AND update the probe table name in `db.php`.** The schema files must be saved WITHOUT a UTF-8 BOM (PowerShell `Set-Content -Encoding utf8` adds one; SQLite tolerates it but MySQL rejects the first statement) — the loader now strips a leading BOM defensively, but don't rely on it. Schema *changes* to existing tables can't ride the replay (CREATE IF NOT EXISTS won't alter) — add an idempotent, self-healing migration step instead (see `migrateBudgetsToCadence`: MySQL does in-place guarded ALTERs keyed off the final index; SQLite rebuilds the table since it can't drop a column inside a UNIQUE constraint). New *columns* on existing tables get a guarded `columnExists`-then-`ALTER` step (e.g. `users.email_verified`, added `DEFAULT 1` so pre-existing rows stay verified; `schedule_items.goal_milestones`, nullable; the four `users.reminder_*`/`timezone` columns, step 11, `reminder_emails` DEFAULT 0 so nobody is opted in; `accounts.archived_at`, step 12, nullable DATETIME — not TIMESTAMP, which MySQL can auto-fill; `accounts.credit_limit_cents` / `statement_day` / `interest_rate_bp`, step 13, all nullable; `budgets.rollover` DEFAULT 0 + nullable `rollover_from`, step 14, so no existing budget rolls over).
 - **Dialect branching**: `Repo::upsertBudget` uses SQLite `ON CONFLICT` vs MySQL `ON DUPLICATE KEY UPDATE` (`DB::driver()`). Keep the `UNIQUE(category_id)` constraint on `budgets` in both schemas or upsert breaks.
 - Reset emails go through PHP `mail()`; set `mail_log_file` in config to write them to a file instead (local/test). Deliverability on shared hosting is imperfect — for production, `mail_from` should be a real mailbox on the domain.
 - Account delete → its transactions' `account_id` and transfers' side `SET NULL` (history shows "Deleted account") — archive settled accounts instead. Category delete → transactions `SET NULL` (become "Uncategorized"), budgets `CASCADE`. Users cascade-delete everything.

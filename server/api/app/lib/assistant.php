@@ -598,10 +598,14 @@ TXT;
         $periods = ['week' => 'weekly, this week (Sunday to Saturday)', 'month' => 'monthly, this month', 'year' => 'yearly, this year'];
         $budgets = array_filter(Repo::listBudgets($uid), static fn(array $b): bool => $b['amountCents'] > 0);
         foreach ($budgets as $b) {
-            $pct = (int)round($b['spentCents'] / $b['amountCents'] * 100);
-            $left = $b['amountCents'] - $b['spentCents'];
+            // A rollover budget's limit this period includes what earlier ones left unused.
+            $limit = $b['amountCents'] + $b['carryCents'];
+            $pct = (int)round($b['spentCents'] / $limit * 100);
+            $left = $limit - $b['spentCents'];
             $L[] = '- ' . $b['categoryName'] . ' (' . ($periods[$b['cadence']] ?? $b['cadence']) . '): ' . $m($b['spentCents'])
-                . ' of ' . $m($b['amountCents']) . " ($pct%), "
+                . ' of ' . $m($limit)
+                . ($b['carryCents'] > 0 ? ' (' . $m($b['amountCents']) . ' budget + ' . $m($b['carryCents']) . ' rolled over)' : '')
+                . " ($pct%), "
                 . ($left >= 0 ? $m($left) . ' left' : 'OVER by ' . $m(-$left));
         }
         if ($budgets === []) {

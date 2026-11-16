@@ -281,6 +281,19 @@ final class DB
                 self::tryDdl("ALTER TABLE accounts ADD COLUMN $name " . ($driver === 'sqlite' ? $sqliteType : $mysqlType));
             }
         }
+
+        // Step 14: budget rollover (unused money carries into the next
+        // period). Off on every existing budget. rollover_from is the first
+        // day of the period carry is counted from.
+        $budgetCols = [
+            'rollover' => ['INTEGER NOT NULL DEFAULT 0', 'TINYINT(1) NOT NULL DEFAULT 0'],
+            'rollover_from' => ['TEXT NULL', 'DATE NULL'],
+        ];
+        foreach ($budgetCols as $name => [$sqliteType, $mysqlType]) {
+            if (!self::columnExists('budgets', $name)) {
+                self::tryDdl("ALTER TABLE budgets ADD COLUMN $name " . ($driver === 'sqlite' ? $sqliteType : $mysqlType));
+            }
+        }
     }
 
     /**

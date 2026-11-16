@@ -2438,6 +2438,92 @@ if (!REMINDERS_CRON) {
   }
 }
 
+// ---------- budgets: rollover (unused money carries into the next period) ----------
+{
+  // Like the budget section above: assumes the runner and the server share
+  // the calendar day (local dates, never toISOString()).
+  const now = new Date();
+  const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const TODAY = ymd(now);
+  const midMonth = (back) => ymd(new Date(now.getFullYear(), now.getMonth() - back, 15));
+  // The Tuesday of the week `back` weeks ago (weeks start on Sunday).
+  const tuesday = (back) => ymd(new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay() - 7 * back + 2));
+
+  const cat = await a.call('POST', '/categories', { name: 'RollProbe', type: 'expense', color: '#123456' });
+  const id = cat.data.id;
+  const row = async (client = a) => (await client.call('GET', '/budgets')).data.find((r) => r.categoryId === id);
+  const spend = (date, amountCents) =>
+    a.call('POST', '/transactions', { amountCents, type: 'expense', categoryId: id, accountId: null, date, note: 'roll' });
+  const put = (body) => a.call('PUT', '/budgets', { categoryId: id, cadence: 'month', amountCents: 100000, ...body });
+  const shape = (r) => `${r?.rollover},${r?.carryCents}`;
+
+  check('a category without a budget has no rollover', shape(await row()) === 'false,0', JSON.stringify(await row()));
+  await put({});
+  check('a new budget starts with rollover off', shape(await row()) === 'false,0');
+
+  // Two months ago 300 of 1,000 was spent, last month 1,500, this month 50.
+  const older = await spend(midMonth(2), 30000);
+  const last = await spend(midMonth(1), 150000);
+  const current = await spend(TODAY, 5000);
+
+  const on = await put({ rollover: true });
+  check('switching rollover on counts from this period: nothing carried yet',
+    on.status === 200 && shape(await row()) === 'true,0' && (await row()).spentCents === 5000, JSON.stringify(await row()));
+
+  // From two months back: 0 + 1,000 − 300 = 700, then 700 + 1,000 − 1,500 = 200.
+  await put({ rollover: true, rolloverFrom: midMonth(2) });
+  check('carry folds each completed period', shape(await row()) === 'true,20000', JSON.stringify(await row()));
+  check("this period's spending isn't part of the carry", (await row()).spentCents === 5000);
+
+  // An older client that doesn't send the keys must not switch it off; the
+  // carry is recomputed at the new amount: 1,200 − 300 = 900, then 900 + 1,200 − 1,500 = 600.
+  await a.call('PUT', '/budgets', { categoryId: id, cadence: 'month', amountCents: 120000 });
+  check('saving without the rollover keys keeps it on, at the new amount',
+    shape(await row()) === 'true,60000' && (await row()).amountCents === 120000, JSON.stringify(await row()));
+
+  const splurge = await spend(midMonth(1), 200000);
+  check('an overspent period uses up the carry but never goes negative', shape(await row()) === 'true,0', JSON.stringify(await row()));
+  await a.call('DELETE', `/transactions/${splurge.data.id}`);
+  check('the carry follows the ledger when an old expense is removed', shape(await row()) === 'true,60000');
+
+  await a.call('PUT', '/budgets', { categoryId: id, cadence: 'week', amountCents: 120000 });
+  const weekly = await row();
+  check('changing the cadence restarts the count at this period',
+    weekly.cadence === 'week' && shape(weekly) === 'true,0', JSON.stringify(weekly));
+
+  // Weekly: 500 a week from two weeks back. That week 200 was spent (300
+  // left), last week nothing (300 + 500 = 800).
+  await a.call('DELETE', `/transactions/${older.data.id}`);
+  await a.call('DELETE', `/transactions/${last.data.id}`);
+  const twoWeeksAgo = await spend(tuesday(2), 20000);
+  await a.call('PUT', '/budgets', { categoryId: id, cadence: 'week', amountCents: 50000, rollover: true, rolloverFrom: tuesday(2) });
+  check('weekly budgets fold week by week from that Sunday', shape(await row()) === 'true,80000', JSON.stringify(await row()));
+
+  const bad = async (label, body) => {
+    const r = await put(body);
+    check(`${label} -> 422`, r.status === 422, `got ${r.status} ${JSON.stringify(r.data)}`);
+  };
+  const tomorrow = ymd(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1));
+  await bad('rollover that is not true/false', { rollover: 'yes' });
+  await bad('a rollover start in the future', { rollover: true, rolloverFrom: tomorrow });
+  await bad('a rollover start more than 5 years back', { rollover: true, rolloverFrom: '2000-01-01' });
+  await bad('a junk rollover start', { rollover: true, rolloverFrom: 'last week' });
+  check('rejected saves changed nothing', shape(await row()) === 'true,80000' && (await row()).cadence === 'week');
+
+  check("another user doesn't see the budget", (await row(b)) === undefined);
+
+  const off = await a.call('PUT', '/budgets', { categoryId: id, cadence: 'week', amountCents: 50000, rollover: false });
+  check('switching rollover off drops the carry', off.status === 200 && shape(await row()) === 'false,0');
+  await a.call('PUT', '/budgets', { categoryId: id, cadence: 'week', amountCents: 50000, rollover: true });
+  check('switching it back on starts fresh', shape(await row()) === 'true,0');
+
+  await a.call('DELETE', `/transactions/${twoWeeksAgo.data.id}`);
+  await a.call('DELETE', `/transactions/${current.data.id}`);
+  await a.call('PUT', '/budgets', { categoryId: id, cadence: 'month', amountCents: 0 });
+  check('removing the budget removes its rollover', shape(await row()) === 'false,0');
+  await a.call('DELETE', `/categories/${id}`);
+}
+
 // ---------- accounts: credit limit, statement day, interest rate ----------
 {
   const base = { color: '#f87171', image: null, dueDay: null, dueDay2: null, openingBalanceCents: 36000 };

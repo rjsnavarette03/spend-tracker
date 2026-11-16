@@ -19,6 +19,7 @@ import { TransactionModal } from '../components/TransactionModal';
 import { TransferModal } from '../components/TransferModal';
 import { TrendChart } from '../components/TrendChart';
 import {
+  budgetLimit,
   CADENCE_PERIOD,
   CADENCE_SHORT,
   cleanError,
@@ -109,7 +110,7 @@ export function Dashboard({
   // all of them would be apples-to-oranges. Track how many are within limit
   // (each compared against its own cadence's current period) instead.
   const activeBudgets = budgets.filter((b) => b.amountCents > 0);
-  const overCount = activeBudgets.filter((b) => b.spentCents > b.amountCents).length;
+  const overCount = activeBudgets.filter((b) => b.spentCents > budgetLimit(b)).length;
   const onTrack = activeBudgets.length - overCount;
   const savingsRate = summary.incomeCents > 0 ? Math.round((net / summary.incomeCents) * 100) : null;
   const topBudgets = [...activeBudgets].sort((a, b) => b.amountCents - a.amountCents).slice(0, 5);
@@ -210,7 +211,8 @@ export function Dashboard({
           ) : (
             <div className="budget-list">
               {topBudgets.map((b) => {
-                const pct = b.amountCents > 0 ? (b.spentCents / b.amountCents) * 100 : 0;
+                const limit = budgetLimit(b);
+                const pct = limit > 0 ? (b.spentCents / limit) * 100 : 0;
                 return (
                   <div className="budget-row-mini" key={b.categoryId}>
                     <div className="line">
@@ -218,9 +220,18 @@ export function Dashboard({
                         <span className="color-dot" style={{ background: b.categoryColor }} />
                         {b.categoryName}
                       </span>
-                      <span className="nums" title={`Spent ${CADENCE_PERIOD[b.cadence]}`}>
-                        {fmtMoney(b.spentCents)} / {fmtMoney(b.amountCents)}
+                      <span
+                        className="nums"
+                        title={
+                          `Spent ${CADENCE_PERIOD[b.cadence]}` +
+                          (b.carryCents > 0
+                            ? ` · ${fmtMoney(b.amountCents)} budget + ${fmtMoney(b.carryCents)} rolled over`
+                            : '')
+                        }
+                      >
+                        {fmtMoney(b.spentCents)} / {fmtMoney(limit)}
                         <span className="cadence-tag">{CADENCE_SHORT[b.cadence]}</span>
+                        {b.carryCents > 0 && <span className="cadence-tag">+rolled over</span>}
                       </span>
                     </div>
                     <ProgressBar pct={pct} />

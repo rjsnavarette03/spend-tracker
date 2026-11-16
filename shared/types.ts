@@ -153,11 +153,17 @@ export type BudgetCadence = 'week' | 'month' | 'year';
 // One row per expense category (budget may be unset = amount 0). A category has
 // at most one recurring budget. `spentCents` is the category's expense total in
 // the current period of `cadence` (this week / this month / this year).
+// With `rollover` on, what earlier periods left unused is carried forward:
+// this period's limit is amountCents + carryCents. An overspent period uses
+// up the carry but never makes it negative. carryCents is 0 with rollover
+// off, and in the period it was switched on.
 export interface Budget {
   id: number;
   categoryId: number;
   cadence: BudgetCadence;
   amountCents: number;
+  rollover: boolean;
+  carryCents: number;
   categoryName: string;
   categoryColor: string;
   spentCents: number;
@@ -435,7 +441,8 @@ export interface Api {
   };
   budgets: {
     list(): Promise<Budget[]>;
-    upsert(categoryId: number, cadence: BudgetCadence, amountCents: number): Promise<void>;
+    // rollover left out = keep what the budget has (off for a new one).
+    upsert(categoryId: number, cadence: BudgetCadence, amountCents: number, rollover?: boolean): Promise<void>;
   };
   subscriptions: {
     list(): Promise<Subscription[]>;

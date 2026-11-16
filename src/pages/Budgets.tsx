@@ -6,6 +6,7 @@ import { CheckIcon } from '../components/Icons';
 import { MoneyInput } from '../components/MoneyInput';
 import { ProgressBar } from '../components/ProgressBar';
 import {
+  budgetLimit,
   CADENCE_LABEL,
   CADENCE_PERIOD,
   centsToInput,
@@ -21,8 +22,12 @@ interface PendingRow {
   row: Budget;
   cadence: BudgetCadence;
   cents: number; // 0 means "remove this budget"
+  rollover: boolean;
   invalid: boolean; // amount typed but not a valid number
 }
+
+// What "the next one" is called for each cadence, for the rollover hint.
+const NEXT_PERIOD: Record<BudgetCadence, string> = { week: 'next week', month: 'next month', year: 'next year' };
 
 export function Budgets() {
   const [rows, setRows] = useState<Budget[]>([]);
@@ -31,12 +36,14 @@ export function Budgets() {
   // categoryId -> in-progress amount / cadence. Edits stay local until Save.
   const [drafts, setDrafts] = useState<Record<number, string>>({});
   const [cadenceDrafts, setCadenceDrafts] = useState<Record<number, BudgetCadence>>({});
+  const [rolloverDrafts, setRolloverDrafts] = useState<Record<number, boolean>>({});
 
   const load = useCallback(async () => {
     try {
       setRows(await api.budgets.list());
       setDrafts({});
       setCadenceDrafts({});
+      setRolloverDrafts({});
       setLoaded(true);
     } catch (err) {
       toast.error(cleanError(err));
@@ -53,9 +60,11 @@ export function Budgets() {
     const amtStr = drafts[row.categoryId];
     const touchedAmt = amtStr !== undefined;
     const touchedCad = cadenceDrafts[row.categoryId] !== undefined;
-    if (!touchedAmt && !touchedCad) continue;
+    const touchedRoll = rolloverDrafts[row.categoryId] !== undefined;
+    if (!touchedAmt && !touchedCad && !touchedRoll) continue;
 
     const cadence = cadenceDrafts[row.categoryId] ?? row.cadence;
+    const rollover = rolloverDrafts[row.categoryId] ?? row.rollover;
     let cents = row.amountCents;
     let invalid = false;
     if (touchedAmt) {
@@ -69,12 +78,13 @@ export function Budgets() {
       }
     }
     if (invalid) {
-      pending.push({ row, cadence, cents: row.amountCents, invalid: true });
+      pending.push({ row, cadence, cents: row.amountCents, rollover, invalid: true });
       continue;
     }
-    // Cadence only matters when there's an amount; a 0 budget doesn't exist.
-    const changed = cents !== row.amountCents || (cents > 0 && cadence !== row.cadence);
-    if (changed) pending.push({ row, cadence, cents, invalid: false });
+    // Cadence and rollover only matter when there's an amount; a 0 budget doesn't exist.
+    const changed =
+      cents !== row.amountCents || (cents > 0 && (cadence !== row.cadence || rollover !== row.rollover));
+    if (changed) pending.push({ row, cadence, cents, rollover, invalid: false });
   }
   const dirty = pending.length > 0;
   const invalidRow = pending.find((p) => p.invalid);
@@ -99,7 +109,7 @@ export function Budgets() {
     if (toSave.length === 0) return;
     setSaving(true);
     try {
-      await Promise.all(toSave.map((p) => api.budgets.upsert(p.row.categoryId, p.cadence, p.cents)));
+      await Promise.all(toSave.map((p) => api.budgets.upsert(p.row.categoryId, p.cadence, p.cents, p.rollover)));
       await load();
       toast.success(`${toSave.length} budget${toSave.length === 1 ? '' : 's'} saved`);
     } catch (err) {
@@ -110,7 +120,7 @@ export function Budgets() {
   };
 
   const active = rows.filter((r) => r.amountCents > 0);
-  const overCount = active.filter((r) => r.spentCents > r.amountCents).length;
+  const overCount = active.filter((r) => r.spentCents > budgetLimit(r)).length;
 
   return (
     <div>
@@ -157,8 +167,12 @@ export function Budgets() {
             <tbody>
               {rows.map((b) => {
                 const cadence = cadenceDrafts[b.categoryId] ?? b.cadence;
-                const pct = b.amountCents > 0 ? (b.spentCents / b.amountCents) * 100 : 0;
-                const remaining = b.amountCents - b.spentCents;
+                const rollover = rolloverDrafts[b.categoryId] ?? b.rollover;
+                // The rollover switch only makes sense next to an amount (typed or saved).
+                const hasAmount = (drafts[b.categoryId] ?? centsToInput(b.amountCents)).trim() !== '';
+                const limit = budgetLimit(b);
+                const pct = b.amountCents > 0 ? (b.spentCents / limit) * 100 : 0;
+                const remaining = limit - b.spentCents;
                 return (
                   <tr key={b.categoryId}>
                     <td>
@@ -197,6 +211,24 @@ export function Budgets() {
                         }
                         onEnter={() => void save()}
                       />
+                      {hasAmount && (
+                        <label
+                          className="budget-rollover"
+                          title={`What you don't spend carries into ${NEXT_PERIOD[cadence]}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={rollover}
+                            onChange={(e) =>
+                              setRolloverDrafts((d) => ({ ...d, [b.categoryId]: e.target.checked }))
+                            }
+                          />
+                          Roll over
+                        </label>
+                      )}
+                      {b.carryCents > 0 && (
+                        <div className="budget-carry num">+{fmtMoney(b.carryCents)} rolled over</div>
+                      )}
                     </td>
                     <td className="num" title={b.amountCents > 0 ? `Spent ${CADENCE_PERIOD[b.cadence]}` : undefined}>
                       {b.amountCents > 0 ? (
@@ -205,7 +237,14 @@ export function Budgets() {
                         <span style={{ color: 'var(--text-faint)' }}>—</span>
                       )}
                     </td>
-                    <td className="num">
+                    <td
+                      className="num"
+                      title={
+                        b.carryCents > 0
+                          ? `${fmtMoney(b.amountCents)} budget + ${fmtMoney(b.carryCents)} rolled over − ${fmtMoney(b.spentCents)} spent`
+                          : undefined
+                      }
+                    >
                       {b.amountCents > 0 ? (
                         <span className={remaining < 0 ? 'amount-expense' : ''}>
                           {fmtMoney(remaining)}
@@ -226,6 +265,11 @@ export function Budgets() {
               })}
             </tbody>
           </table>
+          <div className="field-hint budget-rollover-hint">
+            Roll over: what you don't spend carries into the next week, month or year and is added to that
+            period's limit. Going over uses up what was carried, never more. It counts from the period
+            you switch it on.
+          </div>
         </div>
       )}
     </div>

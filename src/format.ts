@@ -335,6 +335,11 @@ export const CADENCE_LABEL: Record<BudgetCadence, string> = {
   year: 'Yearly',
 };
 
+/** What a budget allows this period: its amount plus anything rolled over. */
+export function budgetLimit(b: { amountCents: number; carryCents: number }): number {
+  return b.amountCents + b.carryCents;
+}
+
 /** Compact suffix tag next to a budget amount, e.g. "$500/mo". */
 export const CADENCE_SHORT: Record<BudgetCadence, string> = {
   week: '/wk',

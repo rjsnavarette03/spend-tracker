@@ -342,7 +342,14 @@ try {
         }
         if ($method === 'PUT' && $sub === '') {
             $b = Http::readJson();
-            Repo::upsertBudget($uid, $b['categoryId'] ?? null, $b['cadence'] ?? null, $b['amountCents'] ?? null);
+            Repo::upsertBudget(
+                $uid,
+                $b['categoryId'] ?? null,
+                $b['cadence'] ?? null,
+                $b['amountCents'] ?? null,
+                $b['rollover'] ?? null,
+                $b['rolloverFrom'] ?? null
+            );
             Http::json(['ok' => true]);
         }
         throw new ApiError('Not found', 404);

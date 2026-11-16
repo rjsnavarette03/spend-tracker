@@ -98,6 +98,12 @@ CREATE TABLE IF NOT EXISTS budgets (
     category_id INT UNSIGNED NOT NULL,
     cadence ENUM('week','month','year') NOT NULL DEFAULT 'month',
     amount_cents BIGINT NOT NULL,
+    -- Rollover: what earlier periods left unused is added to this period's
+    -- limit. rollover_from is the first day of the period carry is counted
+    -- from (set when it's switched on or the cadence changes). The carry
+    -- itself is never stored: Repo::rolloverCarry works it out from the ledger.
+    rollover TINYINT(1) NOT NULL DEFAULT 0,
+    rollover_from DATE NULL,
     PRIMARY KEY (id),
     UNIQUE KEY uniq_budgets_cat (category_id),
     KEY idx_budgets_user (user_id),

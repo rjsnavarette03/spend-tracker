@@ -203,8 +203,8 @@ export const api: Api = {
   },
   budgets: {
     list: () => http('GET', '/budgets'),
-    upsert: (categoryId: number, cadence: BudgetCadence, amountCents: number) =>
-      http('PUT', '/budgets', { categoryId, cadence, amountCents }),
+    upsert: (categoryId: number, cadence: BudgetCadence, amountCents: number, rollover?: boolean) =>
+      http('PUT', '/budgets', { categoryId, cadence, amountCents, ...(rollover === undefined ? {} : { rollover }) }),
   },
   subscriptions: {
     list: () => http('GET', '/subscriptions'),

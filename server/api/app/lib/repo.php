@@ -720,10 +720,69 @@ final class Repo
         return [date('Y-m-01'), date('Y-m-t')]; // month
     }
 
+    /** First day of the period of `cadence` that contains $date (weeks start on Sunday). */
+    private static function periodStart(string $cadence, string $date): string
+    {
+        $ts = (int)strtotime($date . ' 12:00:00');
+        if ($cadence === 'week') {
+            return date('Y-m-d', (int)strtotime('-' . (int)date('w', $ts) . ' days', $ts));
+        }
+        return $cadence === 'year' ? date('Y-01-01', $ts) : date('Y-m-01', $ts);
+    }
+
+    /** Whole periods of `cadence` from the period starting $fromStart to the one holding $date (0 = the same). */
+    private static function periodIndex(string $cadence, string $fromStart, string $date): int
+    {
+        if ($cadence === 'week') {
+            // Noon to noon, so a daylight-saving shift can't drop a day.
+            $days = (int)round((strtotime($date . ' 12:00:00') - strtotime($fromStart . ' 12:00:00')) / 86400);
+            return (int)floor($days / 7);
+        }
+        [$y0, $m0] = array_map('intval', explode('-', $fromStart));
+        [$y, $m] = array_map('intval', explode('-', $date));
+        return $cadence === 'year' ? $y - $y0 : ($y - $y0) * 12 + ($m - $m0);
+    }
+
+    /**
+     * What a rollover budget brings into the current period. Each completed
+     * period since $from leaves carry + amount − spent, never below zero:
+     * unused money rolls forward, and an overspent period uses up the carry
+     * without putting the next one in debt. Worked out from the ledger on
+     * every read, at the budget's current amount, so editing an old expense
+     * is reflected and nothing is stored that could drift.
+     */
+    private static function rolloverCarry(int $uid, int $categoryId, string $cadence, int $amount, string $from, string $currentStart): int
+    {
+        $periods = self::periodIndex($cadence, $from, $currentStart);
+        if ($periods <= 0) {
+            return 0;
+        }
+        $spent = array_fill(0, $periods, 0);
+        $rows = DB::all(
+            "SELECT date, SUM(amount_cents) AS total FROM transactions
+             WHERE user_id = ? AND category_id = ? AND type = 'expense' AND date >= ? AND date < ?
+             GROUP BY date",
+            [$uid, $categoryId, $from, $currentStart]
+        );
+        foreach ($rows as $r) {
+            $i = self::periodIndex($cadence, $from, (string)$r['date']);
+            if ($i >= 0 && $i < $periods) {
+                $spent[$i] += (int)$r['total'];
+            }
+        }
+        $carry = 0;
+        foreach ($spent as $s) {
+            $carry = max(0, $carry + $amount - $s);
+        }
+        return $carry;
+    }
+
     /**
      * One row per expense category (budget may be unset = amount 0). `spentCents`
      * is the category's expense total within the current period of that row's
-     * cadence, so the progress shown is against the right window.
+     * cadence, so the progress shown is against the right window. A rollover
+     * budget also carries `carryCents` — what earlier periods left unused —
+     * so this period's limit is amountCents + carryCents.
      * @return array<int, array<string, mixed>>
      */
     public static function listBudgets(int $uid): array
@@ -739,6 +798,8 @@ final class Repo
                     c.id AS categoryId,
                     COALESCE(b.cadence, 'month') AS cadence,
                     COALESCE(b.amount_cents, 0) AS amountCents,
+                    COALESCE(b.rollover, 0) AS rollover,
+                    b.rollover_from AS rolloverFrom,
                     c.name AS categoryName,
                     c.color AS categoryColor,
                     COALESCE((
@@ -755,18 +816,38 @@ final class Repo
              ORDER BY LOWER(c.name)",
             [$wStart, $yStart, $mStart, $wEnd, $yEnd, $mEnd, $uid]
         );
-        return array_map(static fn(array $r): array => [
-            'id' => (int)$r['id'],
-            'categoryId' => (int)$r['categoryId'],
-            'cadence' => (string)$r['cadence'],
-            'amountCents' => (int)$r['amountCents'],
-            'categoryName' => (string)$r['categoryName'],
-            'categoryColor' => (string)$r['categoryColor'],
-            'spentCents' => (int)$r['spentCents'],
-        ], $rows);
+        $starts = ['week' => $wStart, 'month' => $mStart, 'year' => $yStart];
+        return array_map(static function (array $r) use ($uid, $starts): array {
+            $cadence = (string)$r['cadence'];
+            $amount = (int)$r['amountCents'];
+            $rollover = (int)$r['rollover'] === 1 && $amount > 0;
+            return [
+                'id' => (int)$r['id'],
+                'categoryId' => (int)$r['categoryId'],
+                'cadence' => $cadence,
+                'amountCents' => $amount,
+                'rollover' => $rollover,
+                'carryCents' => $rollover && $r['rolloverFrom'] !== null
+                    ? self::rolloverCarry($uid, (int)$r['categoryId'], $cadence, $amount, (string)$r['rolloverFrom'], $starts[$cadence])
+                    : 0,
+                'categoryName' => (string)$r['categoryName'],
+                'categoryColor' => (string)$r['categoryColor'],
+                'spentCents' => (int)$r['spentCents'],
+            ];
+        }, $rows);
     }
 
-    public static function upsertBudget(int $uid, mixed $categoryId, mixed $cadence, mixed $amountCents): void
+    /**
+     * Sets a category's budget (amount 0 removes it).
+     *
+     * Rollover: `$rollover` absent (null) keeps what the budget has, off for
+     * a new one. Carry is counted from rollover_from, the first day of a
+     * period: the current one when rollover is switched on or the cadence
+     * changes (weeks and months don't line up), unchanged while it stays on,
+     * or the period holding `$rolloverFrom` when the client names a date (up
+     * to 5 years back, never ahead).
+     */
+    public static function upsertBudget(int $uid, mixed $categoryId, mixed $cadence, mixed $amountCents, mixed $rollover = null, mixed $rolloverFrom = null): void
     {
         $categoryId = Validate::intId($categoryId);
         $cadence = Validate::cadence($cadence);
@@ -780,17 +861,42 @@ final class Repo
             );
             return;
         }
+
+        $existing = DB::one(
+            'SELECT cadence, rollover, rollover_from FROM budgets WHERE category_id = ? AND user_id = ?',
+            [$categoryId, $uid]
+        );
+        $wasOn = $existing !== null && (int)$existing['rollover'] === 1;
+        $on = $rollover === null ? $wasOn : Validate::boolean($rollover, 'Rollover');
+        $from = null;
+        if ($on) {
+            $requested = Validate::dateOrNull($rolloverFrom);
+            if ($requested !== null) {
+                if ($requested > date('Y-m-d') || $requested < date('Y-m-d', (int)strtotime('-5 years'))) {
+                    throw new ApiError('Rollover can start up to 5 years back, not in the future', 422);
+                }
+                $from = self::periodStart($cadence, $requested);
+            } elseif ($wasOn && $existing['rollover_from'] !== null && (string)$existing['cadence'] === $cadence) {
+                $from = (string)$existing['rollover_from'];
+            } else {
+                $from = self::currentPeriodRange($cadence)[0];
+            }
+        }
+
+        $params = [$uid, $categoryId, $cadence, $amount, $on ? 1 : 0, $from];
         if (DB::driver() === 'sqlite') {
             DB::exec(
-                'INSERT INTO budgets (user_id, category_id, cadence, amount_cents) VALUES (?, ?, ?, ?)
-                 ON CONFLICT (category_id) DO UPDATE SET cadence = excluded.cadence, amount_cents = excluded.amount_cents',
-                [$uid, $categoryId, $cadence, $amount]
+                'INSERT INTO budgets (user_id, category_id, cadence, amount_cents, rollover, rollover_from) VALUES (?, ?, ?, ?, ?, ?)
+                 ON CONFLICT (category_id) DO UPDATE SET cadence = excluded.cadence, amount_cents = excluded.amount_cents,
+                                                        rollover = excluded.rollover, rollover_from = excluded.rollover_from',
+                $params
             );
         } else {
             DB::exec(
-                'INSERT INTO budgets (user_id, category_id, cadence, amount_cents) VALUES (?, ?, ?, ?)
-                 ON DUPLICATE KEY UPDATE cadence = VALUES(cadence), amount_cents = VALUES(amount_cents)',
-                [$uid, $categoryId, $cadence, $amount]
+                'INSERT INTO budgets (user_id, category_id, cadence, amount_cents, rollover, rollover_from) VALUES (?, ?, ?, ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE cadence = VALUES(cadence), amount_cents = VALUES(amount_cents),
+                                         rollover = VALUES(rollover), rollover_from = VALUES(rollover_from)',
+                $params
             );
         }
     }
