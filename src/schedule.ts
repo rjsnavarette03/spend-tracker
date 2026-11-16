@@ -875,6 +875,16 @@ const DEBT_HORIZON_DAYS = 3660;
 // leaving the debt "not paid off by the schedule".
 const DEBT_ROUNDING_CENTS = 100;
 
+/**
+ * Interest on `balanceCents` over `days` at a yearly rate in basis points
+ * (3600 = 36% a year): simple interest for the stretch, rounded to the cent.
+ * The plan adds it at each due date, so it compounds once per payment.
+ */
+export function interestFor(balanceCents: number, rateBp: number, days: number): number {
+  if (balanceCents <= 0 || rateBp <= 0 || days <= 0) return 0;
+  return Math.round((balanceCents * rateBp * days) / (10000 * 365));
+}
+
 export interface DebtLine {
   account: Account;
   item: ScheduleItem | null; // its loan/card schedule item; null = not on the schedule
@@ -884,12 +894,18 @@ export interface DebtLine {
   lastPaymentCents: number; // the final payment (smaller when the balance runs out first)
   payoffDate: string | null; // null = not scheduled, or still owed after its last scheduled payment
   leftoverCents: number; // owed after the last scheduled payment
+  rateBp: number | null; // the account's yearly interest rate; null = none modelled
+  interestCents: number; // interest the plan adds over the scheduled payments (0 without a rate)
+  // The scheduled payments don't keep up with the interest: more is owed after
+  // the last one than today.
+  growing: boolean;
 }
 
 export interface DebtPoint {
   date: string;
-  totalCents: number; // total still owed (scheduled debts) after this date's payments
+  totalCents: number; // total still owed (scheduled debts) after this date's interest and payments
   payments: Array<{ name: string; amountCents: number }>;
+  interestCents: number; // interest added on this date, before its payments
 }
 
 export interface DebtPlan {
@@ -897,16 +913,22 @@ export interface DebtPlan {
   owedCents: number; // every loan/card balance owed today
   debtFreeDate: string | null; // last payoff among scheduled debts; null if one never finishes or none are scheduled
   points: DebtPoint[]; // today, then each payment date
+  interestCents: number; // projected interest across the scheduled debts
 }
 
 /**
  * Walks every owed loan/card balance down its schedule: each unpaid due date
  * pays its remainder (a fully paid one is skipped, a partial one pays what's
  * left), the last payment is capped at what's still owed, and the debt is
- * paid off on that date. No interest is modelled — installment amounts
- * already include it — and an extra payment shortens the term rather than
+ * paid off on that date. An extra payment shortens the term rather than
  * lowering the installment. Balances are live, so a real extra payment moves
  * the dates on its own; `extra` is a what-if: that much off one debt today.
+ *
+ * Interest is modelled only for an account with a rate (interestRateBp): at
+ * each due date the balance first grows by the interest since the previous
+ * one (since today for the first), then the payment comes off. Without a
+ * rate nothing is added — right for installments that already include their
+ * interest.
  */
 export function buildDebtPlan(
   items: ScheduleItem[],
@@ -920,6 +942,7 @@ export function buildDebtPlan(
   const occurrences = debtItems.flatMap((i) => itemOccurrences(i, ctx, addDays(today, -PLAN_LOOKBACK_DAYS), end));
   const statuses = dueStatuses(occurrences, data, today);
   const paymentsOn = new Map<string, Array<{ name: string; amountCents: number }>>();
+  const interestOn = new Map<string, number>();
 
   const debts = ctx.accounts
     .filter((a) => (a.type === 'loan' || a.type === 'credit') && a.balanceCents < 0)
@@ -927,6 +950,7 @@ export function buildDebtPlan(
       const item = debtItems.find((i) => i.accountId === account.id) ?? null;
       let owed = -account.balanceCents;
       if (extra && extra.accountId === account.id) owed = Math.max(0, owed - extra.amountCents);
+      const rateBp = account.interestRateBp ?? null;
       const line: DebtLine = {
         account,
         item,
@@ -936,10 +960,14 @@ export function buildDebtPlan(
         lastPaymentCents: 0,
         payoffDate: owed === 0 ? today : null,
         leftoverCents: 0,
+        rateBp,
+        interestCents: 0,
+        growing: false,
       };
       if (!item || owed === 0) return line;
 
       let balance = owed;
+      let accruedTo = today; // interest is counted from today's live balance
       let last: { date: string; payment: { name: string; amountCents: number } } | null = null;
       const mine = occurrences
         .filter((o) => o.item.id === item.id)
@@ -949,6 +977,15 @@ export function buildDebtPlan(
         const st = statuses.get(occurrenceKey(o.item.id, o.dueDate));
         if (!st || st.state === 'paid' || st.remainingCents <= 0) continue;
         const date = o.dueDate < today ? today : o.dueDate; // overdue = pay it now
+        if (rateBp !== null) {
+          const interest = interestFor(balance, rateBp, daysBetween(accruedTo, date));
+          if (interest > 0) {
+            balance += interest;
+            line.interestCents += interest;
+            interestOn.set(date, (interestOn.get(date) ?? 0) + interest);
+          }
+          accruedTo = date;
+        }
         const amount = Math.min(balance, st.remainingCents);
         balance -= amount;
         line.paymentsLeft++;
@@ -965,16 +1002,19 @@ export function buildDebtPlan(
         balance = 0;
       }
       line.leftoverCents = balance;
+      line.growing = balance > owed;
       return line;
     });
 
   const scheduled = debts.filter((d) => d.item !== null && d.owedCents > 0);
   let total = scheduled.reduce((s, d) => s + d.owedCents, 0);
-  const points: DebtPoint[] = [{ date: today, totalCents: total, payments: [] }];
-  for (const date of [...paymentsOn.keys()].sort()) {
+  const points: DebtPoint[] = [{ date: today, totalCents: total, payments: [], interestCents: 0 }];
+  const dates = [...new Set([...paymentsOn.keys(), ...interestOn.keys()])].sort();
+  for (const date of dates) {
     const payments = paymentsOn.get(date) ?? [];
-    total -= payments.reduce((s, p) => s + p.amountCents, 0);
-    points.push({ date, totalCents: total, payments });
+    const interestCents = interestOn.get(date) ?? 0;
+    total += interestCents - payments.reduce((s, p) => s + p.amountCents, 0);
+    points.push({ date, totalCents: total, payments, interestCents });
   }
 
   const payoffs = scheduled.map((d) => d.payoffDate);
@@ -982,7 +1022,54 @@ export function buildDebtPlan(
     scheduled.length > 0 && payoffs.every((p) => p !== null)
       ? (payoffs as string[]).reduce((a, b) => (b > a ? b : a))
       : null;
-  return { debts, owedCents: debts.reduce((s, d) => s + d.owedCents, 0), debtFreeDate, points };
+  return {
+    debts,
+    owedCents: debts.reduce((s, d) => s + d.owedCents, 0),
+    debtFreeDate,
+    points,
+    interestCents: scheduled.reduce((s, d) => s + d.interestCents, 0),
+  };
+}
+
+/** Where an extra payment today does the most good. */
+export interface ExtraTarget {
+  accountId: number;
+  savedCents: number; // projected interest it avoids
+  daysSooner: number; // how much earlier the debt-free date lands (0 = unchanged or unknown)
+}
+
+/**
+ * The scheduled debt an extra `amountCents` today is best spent on: the one
+ * that avoids the most projected interest, then the one that brings the
+ * debt-free date forward the most. null when it makes no difference where it
+ * goes (no rates set and the date doesn't move), or there's nothing to compare.
+ */
+export function bestExtraTarget(
+  items: ScheduleItem[],
+  data: ScheduleData,
+  ctx: ScheduleContext,
+  today: string,
+  amountCents: number
+): ExtraTarget | null {
+  if (amountCents <= 0) return null;
+  const base = buildDebtPlan(items, data, ctx, today);
+  let best: ExtraTarget | null = null;
+  for (const d of base.debts) {
+    if (d.item === null || d.owedCents === 0) continue;
+    const alt = buildDebtPlan(items, data, ctx, today, { accountId: d.account.id, amountCents });
+    const savedCents = Math.max(0, base.interestCents - alt.interestCents);
+    const daysSooner =
+      base.debtFreeDate && alt.debtFreeDate ? Math.max(0, daysBetween(alt.debtFreeDate, base.debtFreeDate)) : 0;
+    if (savedCents === 0 && daysSooner === 0) continue;
+    if (
+      best === null ||
+      savedCents > best.savedCents ||
+      (savedCents === best.savedCents && daysSooner > best.daysSooner)
+    ) {
+      best = { accountId: d.account.id, savedCents, daysSooner };
+    }
+  }
+  return best;
 }
 
 // ---------- cash-flow forecast ----------

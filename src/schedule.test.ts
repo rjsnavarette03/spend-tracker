@@ -12,6 +12,7 @@ import type {
 import {
   addDays,
   allPaydayOccurrences,
+  bestExtraTarget,
   buildCalendar,
   buildDebtPlan,
   buildForecast,
@@ -24,6 +25,7 @@ import {
   dueStatuses,
   estimateWindow,
   fundingPayday,
+  interestFor,
   isPastDue,
   itemOccurrences,
   monthlyCents,
@@ -853,6 +855,59 @@ describe('buildDebtPlan', () => {
     const unfinished = buildDebtPlan([short, card], data([short, card], october), gap, TODAY);
     expect(line(unfinished, 10)).toMatchObject({ lastPaymentCents: 3000_00, payoffDate: null, leftoverCents: 1_00 });
     expect(unfinished.debtFreeDate).toBeNull();
+  });
+
+  it('adds interest at each due date for an account with a rate, and none without', () => {
+    expect([interestFor(2000_00, 3600, 23), interestFor(0, 3600, 23), interestFor(2000_00, 0, 23), interestFor(2000_00, 3600, 0)]).toEqual([45_37, 0, 0, 0]);
+    const withRate = ctx([accounts[0], carAccount, { ...cardAccount, interestRateBp: 3600 }, otherLoan]);
+    const plan = buildDebtPlan(items, data(items, october), withRate, TODAY);
+    // Card: 2,000 at 36% a year, 1,000 on the 20th.
+    //   Nov 20 (23 days): +45.37 -> 2,045.37 - 1,000.00 = 1,045.37
+    //   Dec 20 (30 days): +30.93 -> 1,076.30 - 1,000.00 =    76.30
+    //   Jan 20 (31 days): + 2.33 ->    78.63 -    78.63 =     0
+    expect(line(plan, 11)).toMatchObject({
+      rateBp: 3600, interestCents: 78_63, paymentsLeft: 3, lastPaymentCents: 78_63, payoffDate: '2027-01-20', leftoverCents: 0, growing: false,
+    });
+    // The loan has no rate: exactly as before.
+    expect(line(plan, 10)).toMatchObject({ rateBp: null, interestCents: 0, paymentsLeft: 4, payoffDate: '2027-02-05' });
+    expect(plan.interestCents).toBe(78_63);
+    expect(plan.debtFreeDate).toBe('2027-02-05');
+    expect(plan.points.map((p) => [p.date, p.totalCents, p.interestCents])).toEqual([
+      [TODAY, 12000_00, 0],
+      ['2026-11-05', 9000_00, 0],
+      ['2026-11-20', 8045_37, 45_37],
+      ['2026-12-05', 5045_37, 0],
+      ['2026-12-20', 4076_30, 30_93],
+      ['2027-01-05', 1076_30, 0],
+      ['2027-01-20', 1000_00, 2_33],
+      ['2027-02-05', 0, 0],
+    ]);
+  });
+
+  it('flags a payment that does not keep up with the interest', () => {
+    // 1000% a year on 2,000: about 1,260 of interest before the first 1,000 payment.
+    const threePayments = { ...card, endDate: '2027-01-20' };
+    const steep = ctx([accounts[0], { ...cardAccount, interestRateBp: 100000 }]);
+    const plan = buildDebtPlan([threePayments], data([threePayments], october), steep, TODAY);
+    const d = line(plan, 11);
+    expect(d).toMatchObject({ paymentsLeft: 3, payoffDate: null, growing: true });
+    expect(d?.leftoverCents).toBe(2000_00 + (d?.interestCents ?? 0) - 3000_00);
+    expect(d?.leftoverCents).toBeGreaterThan(2000_00);
+    expect(plan.debtFreeDate).toBeNull();
+    // A schedule that simply ends early is short, not growing.
+    const short = { ...car, endDate: '2026-12-05' };
+    expect(line(buildDebtPlan([short], data([short], october), c, TODAY), 10)).toMatchObject({ growing: false, leftoverCents: 4000_00 });
+  });
+
+  it('says where an extra payment does the most good', () => {
+    const withRate = ctx([accounts[0], carAccount, { ...cardAccount, interestRateBp: 3600 }, otherLoan]);
+    // 500 off the card today: 34.03 + 15.80 of interest instead of 78.63.
+    expect(bestExtraTarget(items, data(items, october), withRate, TODAY, 500_00)).toEqual({ accountId: 11, savedCents: 28_80, daysSooner: 0 });
+    // No rates: 3,000 on the car brings the debt-free date from Feb 5 to Jan 5.
+    expect(bestExtraTarget(items, data(items, october), c, TODAY, 3000_00)).toEqual({ accountId: 10, savedCents: 0, daysSooner: 31 });
+    // Too little to move anything, or nothing to spend: no recommendation.
+    expect(bestExtraTarget(items, data(items, october), c, TODAY, 100_00)).toBeNull();
+    expect(bestExtraTarget(items, data(items, october), withRate, TODAY, 0)).toBeNull();
   });
 
   it('treats a paused item as not scheduled, and nothing owed as no plan', () => {
