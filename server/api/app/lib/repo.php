@@ -856,6 +856,115 @@ final class Repo
         return array_map(static fn(array $r): int => (int)$r['y'], $rows);
     }
 
+    /**
+     * Net worth at the end of each of the last $months months, oldest first
+     * (the last point is "now"). An account's balance at a month end is its
+     * opening balance plus everything dated up to then; assets are the
+     * positive balances and liabilities the negative ones — the Accounts
+     * page's Net Worth card, back in time.
+     *
+     * An account counts from the month it was added, or from its first dated
+     * entry when that's earlier: before then its balance isn't known, so it
+     * isn't guessed. Months before the first account are left out. The last
+     * point takes every entry (future-dated ones too), so it always equals
+     * the card.
+     *
+     * @return array<int, array{month: string, assetsCents: int, liabilitiesCents: int, netCents: int}>
+     */
+    public static function netWorthHistory(int $uid, mixed $months): array
+    {
+        $n = is_numeric($months) ? (int)$months : 12;
+        $n = max(1, min(60, $n));
+
+        $accounts = DB::all(
+            'SELECT id, opening_balance_cents AS opening, created_at AS createdAt FROM accounts WHERE user_id = ?',
+            [$uid]
+        );
+        if ($accounts === []) {
+            return [];
+        }
+
+        // Signed change per account per month, from the three places money moves.
+        /** @var array<int, array<string, int>> $deltas */
+        $deltas = [];
+        $sources = [
+            "SELECT account_id AS accountId, SUBSTR(date, 1, 7) AS month,
+                    SUM(CASE WHEN type = 'income' THEN amount_cents ELSE -amount_cents END) AS delta
+             FROM transactions WHERE user_id = ? AND account_id IS NOT NULL
+             GROUP BY account_id, SUBSTR(date, 1, 7)",
+            'SELECT from_account_id AS accountId, SUBSTR(date, 1, 7) AS month,
+                    -SUM(amount_cents + fee_cents) AS delta
+             FROM transfers WHERE user_id = ? AND from_account_id IS NOT NULL
+             GROUP BY from_account_id, SUBSTR(date, 1, 7)',
+            'SELECT to_account_id AS accountId, SUBSTR(date, 1, 7) AS month,
+                    SUM(amount_cents) AS delta
+             FROM transfers WHERE user_id = ? AND to_account_id IS NOT NULL
+             GROUP BY to_account_id, SUBSTR(date, 1, 7)',
+        ];
+        foreach ($sources as $sql) {
+            foreach (DB::all($sql, [$uid]) as $r) {
+                $id = (int)$r['accountId'];
+                $month = (string)$r['month'];
+                $deltas[$id][$month] = ($deltas[$id][$month] ?? 0) + (int)$r['delta'];
+            }
+        }
+
+        $y = (int)date('Y');
+        $m = (int)date('n');
+        $monthList = [];
+        for ($i = $n - 1; $i >= 0; $i--) {
+            $monthList[] = date('Y-m', (int)mktime(12, 0, 0, $m - $i, 1, $y));
+        }
+        $current = $monthList[count($monthList) - 1];
+
+        $points = [];
+        foreach ($monthList as $month) {
+            $points[$month] = ['month' => $month, 'assetsCents' => 0, 'liabilitiesCents' => 0, 'netCents' => 0];
+        }
+        $earliest = null;
+        foreach ($accounts as $a) {
+            $mine = $deltas[(int)$a['id']] ?? [];
+            ksort($mine);
+            $start = substr((string)$a['createdAt'], 0, 7);
+            $firstEntry = array_key_first($mine);
+            if ($firstEntry !== null && $firstEntry < $start) {
+                $start = $firstEntry;
+            }
+            // An account whose only entries are dated ahead still exists today.
+            $start = min($start, $current);
+            if ($earliest === null || $start < $earliest) {
+                $earliest = $start;
+            }
+            $opening = (int)$a['opening'];
+            foreach ($monthList as $month) {
+                if ($month < $start) {
+                    continue;
+                }
+                $balance = $opening;
+                foreach ($mine as $deltaMonth => $delta) {
+                    if ($deltaMonth <= $month || $month === $current) {
+                        $balance += $delta;
+                    }
+                }
+                if ($balance > 0) {
+                    $points[$month]['assetsCents'] += $balance;
+                } else {
+                    $points[$month]['liabilitiesCents'] -= $balance;
+                }
+            }
+        }
+
+        $out = [];
+        foreach ($points as $month => $p) {
+            if ($month < $earliest) {
+                continue; // nothing was tracked yet
+            }
+            $p['netCents'] = $p['assetsCents'] - $p['liabilitiesCents'];
+            $out[] = $p;
+        }
+        return $out;
+    }
+
     // ---------- subscriptions ----------
 
     private const SUB_SELECT =

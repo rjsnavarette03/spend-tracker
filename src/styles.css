@@ -3023,6 +3023,16 @@ select {
   font-size: 13.5px;
 }
 
+/* Net worth over time (Accounts): the change since the first point. */
+.nw-panel {
+  margin-bottom: 14px;
+}
+
+.nw-change {
+  margin-bottom: 6px;
+  font-size: 13.5px;
+}
+
 /* One-click fixes under a shortfall: move money in / pay what's on hand. */
 .fc-fixes {
   display: flex;

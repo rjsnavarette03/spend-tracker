@@ -315,6 +315,16 @@ export interface BreakdownRow {
   totalCents: number;
 }
 
+// Net worth at the end of one month (the newest point is "now"): assets are
+// the positive account balances, liabilities the negative ones. An account
+// counts from the month it was added or first used.
+export interface NetWorthPoint {
+  month: string; // YYYY-MM
+  assetsCents: number;
+  liabilitiesCents: number; // positive number = owed
+  netCents: number;
+}
+
 // ---------- AI assistant (the floating "Ask about your money" chat) ----------
 
 export interface AssistantMessage {
@@ -445,6 +455,8 @@ export interface Api {
     trend(endMonth: string, count: number): Promise<MonthlySummary[]>;
     breakdown(from: string, to: string, type: TxType): Promise<BreakdownRow[]>;
     years(): Promise<number[]>;
+    // Oldest first; shorter than `months` when tracking started later.
+    netWorth(months: number): Promise<NetWorthPoint[]>;
   };
   assistant: {
     status(): Promise<AssistantStatus>;

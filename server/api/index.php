@@ -384,6 +384,9 @@ try {
         if ($sub === 'years') {
             Http::json(Repo::transactionYears($uid));
         }
+        if ($sub === 'networth') {
+            Http::json(Repo::netWorthHistory($uid, $_GET['months'] ?? 12));
+        }
         throw new ApiError('Not found', 404);
     }
 

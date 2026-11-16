@@ -2438,6 +2438,79 @@ if (!REMINDERS_CRON) {
   }
 }
 
+// ---------- net worth history (GET /reports/networth) ----------
+{
+  // YYYY-MM `back` months before this one (negative = ahead). Like the budget
+  // section, this assumes the runner and the server share the calendar day.
+  const ym = (back) => {
+    const now = new Date();
+    const d = new Date(now.getFullYear(), now.getMonth() - back, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  };
+  const history = async (client, months = 6) => (await client.call('GET', `/reports/networth?months=${months}`)).data;
+  const at = (list, month) =>
+    list.find((p) => p.month === month) ?? { assetsCents: 0, liabilitiesCents: 0, netCents: 0 };
+  // What the new rows added to one month's point.
+  const added = (before, after, month) => [
+    at(after, month).assetsCents - at(before, month).assetsCents,
+    at(after, month).liabilitiesCents - at(before, month).liabilitiesCents,
+    at(after, month).netCents - at(before, month).netCents,
+  ];
+
+  const before = await history(a);
+  const bobBefore = await history(b);
+  check('net worth history is a list, oldest month first, ending this month',
+    Array.isArray(before) && before.length >= 1 && before.length <= 6 && before[before.length - 1].month === ym(0)
+      && before.every((p, i) => i === 0 || p.month > before[i - 1].month),
+    JSON.stringify(before.map((p) => p.month)));
+  check('each point: net = assets − liabilities',
+    before.every((p) => p.netCents === p.assetsCents - p.liabilitiesCents));
+
+  const bank = await a.call('POST', '/accounts', { name: 'NW Bank', type: 'debit', color: '#38bdf8', openingBalanceCents: 100000 });
+  const card = await a.call('POST', '/accounts', { name: 'NW Card', type: 'credit', color: '#f87171', openingBalanceCents: 30000 });
+  // Income dated two months back: the bank account counts from that month.
+  const income = await a.call('POST', '/transactions', {
+    amountCents: 5000, type: 'income', categoryId: null, accountId: bank.data.id, date: `${ym(2)}-10`, note: 'nw old income',
+  });
+  // A card payment last month (the card's first entry) with a fee.
+  const payment = await a.call('POST', '/transfers', {
+    fromAccountId: bank.data.id, toAccountId: card.data.id, amountCents: 10000, feeCents: 500, date: `${ym(1)}-05`, note: 'nw pay card',
+  });
+  // A purchase dated two months ahead: only the newest point ("now") has it.
+  const ahead = await a.call('POST', '/transactions', {
+    amountCents: 700, type: 'expense', categoryId: null, accountId: card.data.id, date: `${ym(-2)}-01`, note: 'nw future',
+  });
+
+  const after = await history(a);
+  check('an account does not count before its first entry',
+    added(before, after, ym(3)).join() === '0,0,0', added(before, after, ym(3)).join());
+  check('month-end balance = opening + entries dated up to then',
+    added(before, after, ym(2)).join() === '105000,0,105000', added(before, after, ym(2)).join());
+  check('transfers move both sides (fee leaves the source only)',
+    added(before, after, ym(1)).join() === '94500,20000,74500', added(before, after, ym(1)).join());
+  check('the newest point takes future-dated entries too',
+    added(before, after, ym(0)).join() === '94500,20700,73800', added(before, after, ym(0)).join());
+
+  const accounts = (await a.call('GET', '/accounts')).data;
+  const assets = accounts.filter((x) => x.balanceCents > 0).reduce((s, x) => s + x.balanceCents, 0);
+  const owed = accounts.filter((x) => x.balanceCents < 0).reduce((s, x) => s - x.balanceCents, 0);
+  const now = after[after.length - 1];
+  check('the newest point equals the live account balances',
+    now.assetsCents === assets && now.liabilitiesCents === owed, `${JSON.stringify(now)} vs ${assets}/${owed}`);
+
+  check('months is clamped to 1–60 and defaults to 12',
+    (await history(a, 0)).length === 1 && (await history(a, 999)).length <= 60 && (await history(a, 'junk')).length <= 12);
+  check("another user's history is untouched",
+    JSON.stringify(await history(b)) === JSON.stringify(bobBefore));
+
+  await a.call('DELETE', `/transfers/${payment.data.id}`);
+  await a.call('DELETE', `/transactions/${income.data.id}`);
+  await a.call('DELETE', `/transactions/${ahead.data.id}`);
+  await a.call('DELETE', `/accounts/${bank.data.id}`);
+  await a.call('DELETE', `/accounts/${card.data.id}`);
+  check('removing the rows restores the history', JSON.stringify(await history(a)) === JSON.stringify(before));
+}
+
 // ---------- logout ----------
 {
   const out = await a.call('POST', '/auth/logout');

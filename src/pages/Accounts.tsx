@@ -7,6 +7,7 @@ import { confirm, toast } from '../components/feedback';
 import { AccountEditModal } from '../components/AccountEditModal';
 import { DueTag } from '../components/DueTag';
 import { PencilIcon, PlusIcon, TransferIcon, TrashIcon } from '../components/Icons';
+import { NetWorthChart } from '../components/NetWorthChart';
 import { Pager } from '../components/Pager';
 import { TransferModal } from '../components/TransferModal';
 import { cleanError, dateLabel, fmtMoney, nextDueInfo, timeLabel } from '../format';
@@ -250,6 +251,8 @@ export function Accounts({
               </div>
             </div>
           </div>
+
+          <NetWorthChart version={accounts.map((a) => `${a.id}:${a.balanceCents}`).join(',')} />
 
           <div className="accounts-grid">
             {SECTIONS.map(({ type, title, hint }) => {

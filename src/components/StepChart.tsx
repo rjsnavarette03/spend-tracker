@@ -36,10 +36,18 @@ export function StepChart({
   points,
   ariaLabel,
   startLabel = 'Today',
+  line: straight = false,
+  tipTitle = (p) => shortDateLabel(p.date),
+  axisLabel,
 }: {
   points: StepPoint[];
   ariaLabel: string;
   startLabel?: string;
+  // Join the points with straight segments instead of steps, for values
+  // sampled at intervals (month-end balances) rather than at each change.
+  line?: boolean;
+  tipTitle?: (p: StepPoint) => string; // the tooltip's heading (default: the date)
+  axisLabel?: (date: string) => string; // `line` only: the x-axis label of a point
 }) {
   const uid = useId().replace(/:/g, '');
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -76,7 +84,9 @@ export function StepChart({
   const zeroY = y(0);
 
   let line = `M ${x(0)} ${y(values[0])}`;
-  for (let i = 1; i < points.length; i++) line += ` H ${x(i)} V ${y(values[i])}`;
+  for (let i = 1; i < points.length; i++) {
+    line += straight ? ` L ${x(i)} ${y(values[i])}` : ` H ${x(i)} V ${y(values[i])}`;
+  }
   const area = `${line} V ${zeroY} H ${x(0)} Z`;
 
   // Evenly spaced date labels, about one per 70px, first and last pinned.
@@ -84,13 +94,21 @@ export function StepChart({
   const long = span > 120;
   const labelFor = (date: string) =>
     parseYmd(date).toLocaleDateString('en-US', long ? { month: 'short', year: 'numeric' } : { month: 'short', day: 'numeric' });
-  const labels = Array.from({ length: labelCount }, (_, k) => {
-    const days = Math.round((k * span) / (labelCount - 1));
-    const d = parseYmd(first);
-    const date = new Date(d.getFullYear(), d.getMonth(), d.getDate() + days);
-    const ymd = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-    return { x: PAD_L + (days / span) * PLOT_W, text: k === 0 ? startLabel : labelFor(ymd), k };
-  });
+  // A sampled line labels its own points (evenly picked, ends pinned), so two
+  // labels never name the same month; a step line labels evenly spaced dates.
+  const pointLabels = Math.min(labelCount, points.length);
+  const labels = straight
+    ? Array.from({ length: pointLabels }, (_, k) => {
+        const i = Math.round((k * (points.length - 1)) / (pointLabels - 1));
+        return { x: x(i), text: k === 0 ? startLabel : (axisLabel ?? labelFor)(points[i].date), k, last: k === pointLabels - 1 };
+      })
+    : Array.from({ length: labelCount }, (_, k) => {
+        const days = Math.round((k * span) / (labelCount - 1));
+        const d = parseYmd(first);
+        const date = new Date(d.getFullYear(), d.getMonth(), d.getDate() + days);
+        const ymd = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+        return { x: PAD_L + (days / span) * PLOT_W, text: k === 0 ? startLabel : labelFor(ymd), k, last: k === labelCount - 1 };
+      });
 
   const nearest = (px: number) => {
     let best = 0;
@@ -157,7 +175,7 @@ export function StepChart({
             x={l.x}
             y={H - 8}
             // The end labels hug the plot edges instead of hanging off them.
-            textAnchor={l.k === 0 ? 'start' : l.k === labelCount - 1 ? 'end' : 'middle'}
+            textAnchor={l.k === 0 ? 'start' : l.last ? 'end' : 'middle'}
             className="chart-label"
           >
             {l.text}
@@ -184,7 +202,7 @@ export function StepChart({
 
       {point && (
         <div className={`fc-tooltip fc-tooltip-${align}`} style={{ left: `${ratio * 100}%` }} role="status">
-          <div className="fc-tooltip-date">{shortDateLabel(point.date)}</div>
+          <div className="fc-tooltip-date">{tipTitle(point)}</div>
           <div className={`fc-tooltip-value num ${point.valueCents < 0 ? 'amount-expense' : ''}`}>
             {fmtMoney(point.valueCents)}
           </div>

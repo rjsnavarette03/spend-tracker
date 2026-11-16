@@ -248,6 +248,7 @@ export const api: Api = {
     breakdown: (from: string, to: string, type: TxType) =>
       http('GET', `/reports/breakdown${qs({ from, to, type })}`),
     years: () => http('GET', '/reports/years'),
+    netWorth: (months: number) => http('GET', `/reports/networth${qs({ months })}`),
   },
   assistant: {
     status: () => http('GET', '/assistant'),

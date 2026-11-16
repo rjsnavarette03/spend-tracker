@@ -166,6 +166,12 @@ POST /assistant/chat  { messages: [{ role: user|assistant, content }] } → { re
       rate-limited, 502 when the provider fails. See lib/assistant.php.)
 GET  /reports/summary?month             GET /reports/trend?endMonth&count
 GET  /reports/breakdown?month&type      GET /reports/years → [YYYY,…] (years with tx)
+GET  /reports/networth?months=12 → [{ month, assetsCents, liabilitiesCents, netCents }]
+     (net worth at each month end, oldest first, 1–60 months; the Accounts page's
+      "Net worth over time" chart. Balance at a month end = opening + everything
+      dated up to then; an account counts from the month it was added or of its
+      first dated entry, months before the first account are left out, and the
+      newest point takes every entry so it always equals the Net Worth card.)
 ```
 
 ### Security model
