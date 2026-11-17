@@ -7,6 +7,7 @@ import type {
   MeResponse,
   ScheduleItemInput,
   SchedulePayInput,
+  SplitInput,
   SubscriptionInput,
   TransferInput,
   TxFilter,
@@ -195,11 +196,17 @@ export const api: Api = {
           categoryId: filter.categoryId === 'all' ? undefined : filter.categoryId,
           accountId: filter.accountId === 'all' ? undefined : filter.accountId,
           search: filter.search,
+          splitGroup: filter.splitGroup,
         })}`
       ),
     create: (data: TxInput) => http('POST', '/transactions', data),
     update: (id: number, data: TxInput) => http('PUT', `/transactions/${id}`, data),
     remove: (id: number) => http('DELETE', `/transactions/${id}`),
+    split: (data: SplitInput) => http('POST', '/transactions/split', data),
+    resplit: (id: number, data: SplitInput) => http('PUT', `/transactions/${id}/split`, data),
+    removeSplit: async (id: number) => {
+      await http<{ ok: boolean }>('DELETE', `/transactions/${id}/split`);
+    },
   },
   budgets: {
     list: () => http('GET', '/budgets'),

@@ -318,6 +318,21 @@ try {
 
     // ---------- transactions ----------
     if ($resource === 'transactions') {
+        // Split receipts (one receipt across categories); before the plain
+        // routes, which would take /transactions/:id/split as /transactions/:id.
+        if ($method === 'POST' && $sub === 'split') {
+            Http::json(Repo::createSplit($uid, Http::readJson()), 201);
+        }
+        if ($sub !== '' && ($seg[2] ?? '') === 'split') {
+            if ($method === 'PUT') {
+                Http::json(Repo::updateSplit($uid, Validate::intId($sub), Http::readJson()));
+            }
+            if ($method === 'DELETE') {
+                Repo::deleteSplit($uid, Validate::intId($sub));
+                Http::json(['ok' => true]);
+            }
+            throw new ApiError('Not found', 404);
+        }
         if ($method === 'GET' && $sub === '') {
             Http::json(Repo::listTransactions($uid, $_GET));
         }

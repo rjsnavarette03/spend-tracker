@@ -79,11 +79,15 @@ CREATE TABLE IF NOT EXISTS transactions (
     date CHAR(10) NOT NULL,
     time CHAR(5) NULL,
     note VARCHAR(500) NOT NULL DEFAULT '',
+    -- Parts of one split receipt share split_group = the smallest id among
+    -- them (see Repo::createSplit); NULL = an ordinary transaction.
+    split_group INT UNSIGNED NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     KEY idx_transactions_user_date (user_id, date),
     KEY idx_transactions_category (category_id),
     KEY idx_transactions_account (account_id),
+    KEY idx_transactions_split (user_id, split_group),
     CONSTRAINT fk_transactions_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     CONSTRAINT fk_transactions_category FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL,
     CONSTRAINT fk_transactions_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE SET NULL

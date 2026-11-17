@@ -6,6 +6,7 @@ import { centsToInput, cleanError, fmtMoney, nowTimeHm, parseAmountToCents, toda
 import { CheckIcon, PlusIcon } from './Icons';
 import { Modal } from './Modal';
 import { MoneyInput } from './MoneyInput';
+import { SplitModal } from './SplitModal';
 
 export function TransactionModal({
   initial,
@@ -49,6 +50,9 @@ export function TransactionModal({
   const [note, setNote] = useState(initial?.note ?? '');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  // A part of a split opens straight in the split form; "Split across
+  // categories" switches to it with what's typed so far.
+  const [splitting, setSplitting] = useState(initial?.splitGroup != null);
 
   const options = useMemo(() => categories.filter((c) => c.type === type), [categories, type]);
 
@@ -118,6 +122,20 @@ export function TransactionModal({
     }
   };
 
+  if (splitting) {
+    return (
+      <SplitModal
+        initial={initial}
+        draft={{ type, amountCents: parseAmountToCents(amount), categoryId, accountId, date, time, note }}
+        categories={categories}
+        accounts={accounts}
+        lockType={lockType}
+        onClose={onClose}
+        onSaved={onSaved}
+      />
+    );
+  }
+
   return (
     <Modal title={initial ? 'Edit transaction' : 'Add transaction'} onClose={onClose}>
       <form className="form-grid" onSubmit={submit}>
@@ -166,6 +184,9 @@ export function TransactionModal({
               </option>
             ))}
           </select>
+          <button type="button" className="link-button split-link" onClick={() => setSplitting(true)}>
+            Split across categories
+          </button>
         </div>
 
         {showAccountField && (

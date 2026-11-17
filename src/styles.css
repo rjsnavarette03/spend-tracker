@@ -3023,6 +3023,66 @@ select {
   font-size: 13.5px;
 }
 
+/* Split receipts: the tag on each part, and the parts list in the split form. */
+.split-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 20px;
+  background: rgba(99, 102, 241, 0.14);
+  color: var(--accent);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+.chip-stack .split-tag {
+  margin-left: 0;
+}
+
+.split-parts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.split-part {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px 30px;
+  gap: 8px;
+  align-items: center;
+}
+
+.split-part .money-input {
+  width: 100%;
+}
+
+.split-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 10px;
+}
+
+.split-total {
+  font-size: 13px;
+}
+
+.split-link {
+  align-self: flex-start;
+  font-size: 12.5px;
+}
+
+.split-delete {
+  display: inline-flex;
+  gap: 8px;
+  margin-right: auto;
+}
+
 /* Budget rollover: the switch under a budget's amount and what it carried in. */
 .budget-rollover {
   display: flex;

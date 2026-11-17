@@ -2524,6 +2524,113 @@ if (!REMINDERS_CRON) {
   await a.call('DELETE', `/categories/${id}`);
 }
 
+// ---------- split transactions (one receipt across categories) ----------
+{
+  const cat = async (name, type) => (await a.call('POST', '/categories', { name, type, color: '#123456' })).data.id;
+  const food = await cat('SplitFood', 'expense');
+  const home = await cat('SplitHome', 'expense');
+  const pay = await cat('SplitPay', 'income');
+  const bank = (await a.call('POST', '/accounts', { name: 'Split Bank', type: 'debit', color: '#38bdf8', openingBalanceCents: 1000000 })).data;
+  const loan = (await a.call('POST', '/accounts', { name: 'Split Loan', type: 'loan', color: '#a78bfa', openingBalanceCents: 1000 })).data;
+  const base = { type: 'expense', accountId: bank.id, date: '2026-07-20', time: '12:30', note: 'SplitProbe receipt' };
+  const parts = (...p) => p.map(([categoryId, amountCents, id = null]) => ({ id, categoryId, amountCents }));
+  const group = async (g, client = a) => (await client.call('GET', `/transactions?splitGroup=${g}`)).data;
+  const find = async (note) => (await a.call('GET', `/transactions?search=${encodeURIComponent(note)}`)).data;
+  const balance = async () => (await a.call('GET', '/accounts')).data.find((x) => x.id === bank.id).balanceCents;
+
+  const created = await a.call('POST', '/transactions/split', { ...base, parts: parts([food, 200000], [home, 80000]) });
+  const [p1, p2] = created.data ?? [];
+  check('POST /transactions/split creates one transaction per part',
+    created.status === 201 && created.data.length === 2, `${created.status} ${JSON.stringify(created.data)}`);
+  check('the parts share type, account, date, time and note, grouped by the smallest id',
+    p1.splitGroup === p1.id && p2.splitGroup === p1.id && p2.id > p1.id
+      && created.data.every((t) => t.type === 'expense' && t.accountId === bank.id && t.date === '2026-07-20' && t.time === '12:30' && t.note === 'SplitProbe receipt'),
+    JSON.stringify(created.data));
+  check('each part keeps its own category and amount',
+    p1.categoryId === food && p1.amountCents === 200000 && p2.categoryId === home && p2.amountCents === 80000);
+  check('?splitGroup= lists the parts', (await group(p1.id)).map((t) => t.id).sort().join() === [p1.id, p2.id].sort().join());
+  check('ordinary transactions have no split group',
+    (await a.call('GET', '/transactions?month=2026-07')).data.filter((t) => t.id !== p1.id && t.id !== p2.id).every((t) => t.splitGroup === null));
+  check('the account is charged the receipt total', (await balance()) === 1000000 - 280000);
+  const bd = (await a.call('GET', '/reports/breakdown?from=2026-07-20&to=2026-07-20&type=expense')).data;
+  check('reports count each part in its own category',
+    bd.find((r) => r.categoryId === food)?.totalCents === 200000 && bd.find((r) => r.categoryId === home)?.totalCents === 80000, JSON.stringify(bd));
+
+  const bad = async (label, body, path = '/transactions/split', method = 'POST') => {
+    const r = await a.call(method, path, body);
+    check(`${label} -> 422`, r.status === 422, `got ${r.status} ${JSON.stringify(r.data)}`);
+  };
+  const bobCat = (await b.call('POST', '/categories', { name: 'BobSplit', type: 'expense', color: '#123456' })).data.id;
+  await bad('a new split with one part', { ...base, parts: parts([food, 100]) });
+  await bad('a split with 21 parts', { ...base, parts: Array.from({ length: 21 }, () => ({ id: null, categoryId: food, amountCents: 100 })) });
+  await bad('a part with no amount', { ...base, parts: parts([food, 0], [home, 100]) });
+  await bad('a part in a category of the other type', { ...base, parts: parts([food, 100], [pay, 100]) });
+  await bad("a part in another user's category", { ...base, parts: parts([food, 100], [bobCat, 100]) });
+  await bad('a split on a loan account', { ...base, accountId: loan.id, parts: parts([food, 100], [home, 100]) });
+  await bad('parts that are not a list', { ...base, parts: { first: { id: null, categoryId: food, amountCents: 100 } } });
+  await bad('a new split that includes an existing transaction', { ...base, parts: parts([food, 100, p1.id], [home, 100]) });
+  await bad('the same part listed twice', { ...base, parts: parts([food, 100, p1.id], [home, 100, p1.id]) }, `/transactions/${p1.id}/split`, 'PUT');
+  const junkGroup = await a.call('GET', '/transactions?splitGroup=abc');
+  check('a junk ?splitGroup= -> 422', junkGroup.status === 422, `got ${junkGroup.status}`);
+  check('rejected splits saved nothing', (await find('SplitProbe receipt')).length === 2);
+
+  // Re-split from either part: keep part 1, drop part 2, add two new parts.
+  const re = await a.call('PUT', `/transactions/${p2.id}/split`, {
+    ...base, date: '2026-07-21', note: 'SplitProbe receipt fixed', parts: parts([food, 150000, p1.id], [home, 50000], [food, 30000]),
+  });
+  const ids = (re.data ?? []).map((t) => t.id);
+  check('re-splitting keeps listed parts, adds new ones and drops the rest',
+    re.status === 200 && ids.length === 3 && ids[0] === p1.id && !ids.includes(p2.id), `${re.status} ${JSON.stringify(re.data)}`);
+  check('shared fields are written to every part',
+    re.data.every((t) => t.date === '2026-07-21' && t.note === 'SplitProbe receipt fixed' && t.splitGroup === p1.id));
+  check('the dropped part is deleted', (await find('SplitProbe receipt')).length === 3);
+  check('the account follows the new total', (await balance()) === 1000000 - 230000);
+
+  const newer = ids.slice(1);
+  const rekeyed = await a.call('PUT', `/transactions/${newer[0]}/split`, { ...base, parts: parts([home, 50000, newer[0]], [food, 30000, newer[1]]) });
+  check('dropping the smallest part re-keys the split to a remaining part',
+    rekeyed.status === 200 && rekeyed.data.every((t) => t.splitGroup === newer[0]) && !(await find('SplitProbe receipt')).some((t) => t.id === p1.id),
+    JSON.stringify(rekeyed.data));
+  const one = await a.call('PUT', `/transactions/${newer[1]}/split`, { ...base, parts: parts([food, 80000, newer[1]]) });
+  check('one part turns it back into an ordinary transaction',
+    one.status === 200 && one.data.length === 1 && one.data[0].splitGroup === null && one.data[0].amountCents === 80000 && (await find('SplitProbe receipt')).length === 1,
+    JSON.stringify(one.data));
+
+  const plain = (await a.call('POST', '/transactions', {
+    amountCents: 50000, type: 'expense', categoryId: food, accountId: bank.id, date: '2026-07-22', note: 'SplitProbe mall',
+  })).data;
+  const conv = await a.call('PUT', `/transactions/${plain.id}/split`, { ...base, date: '2026-07-22', note: 'SplitProbe mall', parts: parts([food, 30000, plain.id], [home, 20000]) });
+  check('splitting an ordinary transaction keeps its id as a part',
+    conv.status === 200 && conv.data.length === 2 && conv.data[0].id === plain.id && conv.data.every((t) => t.splitGroup === plain.id), JSON.stringify(conv.data));
+  await bad('a part taken from another receipt', { ...base, parts: parts([food, 100, newer[1]], [home, 100, plain.id]) }, `/transactions/${plain.id}/split`, 'PUT');
+
+  const foreignPut = await b.call('PUT', `/transactions/${plain.id}/split`, { ...base, accountId: null, parts: parts([bobCat, 100]) });
+  const foreignDel = await b.call('DELETE', `/transactions/${plain.id}/split`);
+  check("another user can't re-split or delete it", foreignPut.status === 404 && foreignDel.status === 404, `${foreignPut.status} ${foreignDel.status}`);
+  check("another user doesn't see the parts", (await group(plain.id, b)).length === 0);
+
+  const convIds = conv.data.map((t) => t.id);
+  await a.call('DELETE', `/transactions/${plain.id}`);
+  const rest = (await find('SplitProbe mall')).filter((t) => convIds.includes(t.id));
+  check('deleting one part of a two-part split leaves an ordinary transaction',
+    rest.length === 1 && rest[0].splitGroup === null, JSON.stringify(rest));
+
+  const three = (await a.call('POST', '/transactions/split', { ...base, note: 'SplitProbe three', parts: parts([food, 100], [home, 200], [food, 300]) })).data;
+  await a.call('DELETE', `/transactions/${three[0].id}`);
+  const left = await group(three[1].id);
+  check('deleting the first part keeps the rest together under a remaining part',
+    left.length === 2 && left.every((t) => t.splitGroup === three[1].id), JSON.stringify(left));
+  const whole = await a.call('DELETE', `/transactions/${three[2].id}/split`);
+  check('DELETE /transactions/:id/split deletes every part', whole.status === 200 && (await find('SplitProbe three')).length === 0);
+
+  await a.call('DELETE', `/transactions/${newer[1]}`);
+  await a.call('DELETE', `/transactions/${rest[0].id}`);
+  await a.call('DELETE', `/accounts/${bank.id}`);
+  await a.call('DELETE', `/accounts/${loan.id}`);
+  for (const id of [food, home, pay]) await a.call('DELETE', `/categories/${id}`);
+  await b.call('DELETE', `/categories/${bobCat}`);
+}
+
 // ---------- accounts: credit limit, statement day, interest rate ----------
 {
   const base = { color: '#f87171', image: null, dueDay: null, dueDay2: null, openingBalanceCents: 36000 };

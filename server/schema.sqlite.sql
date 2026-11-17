@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     date TEXT NOT NULL,
     time TEXT NULL,
     note TEXT NOT NULL DEFAULT '',
+    split_group INTEGER NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

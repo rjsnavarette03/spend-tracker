@@ -294,6 +294,20 @@ final class DB
                 self::tryDdl("ALTER TABLE budgets ADD COLUMN $name " . ($driver === 'sqlite' ? $sqliteType : $mysqlType));
             }
         }
+
+        // Step 15: split receipts. Rows sharing split_group (the smallest id
+        // among them) are parts of one receipt; NULL on every existing row.
+        // The SQLite index lives here, not in the schema file, so a replay on
+        // an older database never names the column before it exists.
+        if (!self::columnExists('transactions', 'split_group')) {
+            self::tryDdl('ALTER TABLE transactions ADD COLUMN split_group ' . ($driver === 'sqlite' ? 'INTEGER NULL' : 'INT UNSIGNED NULL'));
+            if ($driver !== 'sqlite') {
+                self::tryDdl('ALTER TABLE transactions ADD KEY idx_transactions_split (user_id, split_group)');
+            }
+        }
+        if ($driver === 'sqlite') {
+            self::tryDdl('CREATE INDEX IF NOT EXISTS idx_transactions_split ON transactions(user_id, split_group)');
+        }
     }
 
     /**

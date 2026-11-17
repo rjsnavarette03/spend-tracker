@@ -543,6 +543,7 @@ export function AccountDetail() {
                             />
                             <span>{t.categoryName ?? 'Uncategorized'}</span>
                           </span>
+                          {t.splitGroup != null && <span className="split-tag" title="Part of a split receipt">Split</span>}
                         </td>
                         <td className="note-cell">{t.note}</td>
                         <td className={`num ${t.type === 'income' ? 'amount-income' : 'amount-expense'}`}>
@@ -697,6 +698,7 @@ export function AccountDetail() {
                           />
                           <span>{t.categoryName ?? 'Uncategorized'}</span>
                         </span>
+                        {t.splitGroup != null && <span className="split-tag" title="Part of a split receipt">Split</span>}
                       </td>
                       <td className="note-cell">{t.note}</td>
                       <td className={`num ${t.type === 'income' ? 'amount-income' : 'amount-expense'}`}>

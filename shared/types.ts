@@ -121,10 +121,28 @@ export interface Transaction {
   // as date). NULL on rows that predate the feature / subscription charges.
   time: string | null;
   note: string;
+  // Part of a split receipt: the parts share the type, account, date, time
+  // and note, each in its own category, and splitGroup is the smallest id
+  // among them. null = an ordinary transaction.
+  splitGroup: number | null;
   categoryName: string | null;
   categoryColor: string | null;
   accountName: string | null;
   accountColor: string | null;
+}
+
+// One receipt divided across categories. The shared fields apply to every
+// part. A new split takes 2–20 parts. Re-splitting keeps a part that brings
+// its id (so links to it, like a Schedule payment, survive), adds parts
+// without one and deletes the receipt's parts that are left out; a single
+// part turns it back into an ordinary transaction.
+export interface SplitInput {
+  type: TxType;
+  accountId: number | null;
+  date: string; // YYYY-MM-DD
+  time: string | null;
+  note: string;
+  parts: Array<{ id: number | null; categoryId: number | null; amountCents: number }>;
 }
 
 export interface TxInput {
@@ -145,6 +163,7 @@ export interface TxFilter {
   categoryId?: number | 'all';
   accountId?: number | 'all';
   search?: string;
+  splitGroup?: number; // the parts of one split receipt
 }
 
 // The recurring period a budget amount applies to.
@@ -437,7 +456,13 @@ export interface Api {
     list(filter: TxFilter): Promise<Transaction[]>;
     create(data: TxInput): Promise<Transaction>;
     update(id: number, data: TxInput): Promise<void>;
+    // Deletes this one transaction (one part, when it's part of a split).
     remove(id: number): Promise<void>;
+    split(data: SplitInput): Promise<Transaction[]>;
+    // Re-splits transaction `id`'s receipt, or splits it when it isn't one yet.
+    resplit(id: number, data: SplitInput): Promise<Transaction[]>;
+    // Deletes transaction `id` and every other part of its split.
+    removeSplit(id: number): Promise<void>;
   };
   budgets: {
     list(): Promise<Budget[]>;

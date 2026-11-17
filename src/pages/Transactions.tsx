@@ -394,6 +394,7 @@ export function Transactions({
                           />
                           <span>{r.t.categoryName ?? 'Uncategorized'}</span>
                         </span>
+                        {r.t.splitGroup != null && <span className="split-tag" title="Part of a split receipt">Split</span>}
                         {r.t.accountName && (
                           <span
                             className="cat-chip account-chip"

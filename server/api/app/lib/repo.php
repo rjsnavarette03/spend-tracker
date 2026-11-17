@@ -108,6 +108,18 @@ final class Repo
 
     // ---------- transactions ----------
 
+    private const TX_SELECT =
+        'SELECT t.id, t.amount_cents AS amountCents, t.type, t.category_id AS categoryId,
+                t.account_id AS accountId, t.date, t.time, t.note, t.split_group AS splitGroup,
+                c.name AS categoryName, c.color AS categoryColor,
+                a.name AS accountName, a.color AS accountColor
+         FROM transactions t
+         LEFT JOIN categories c ON c.id = t.category_id
+         LEFT JOIN accounts a ON a.id = t.account_id';
+
+    /** Most parts one split receipt can have. */
+    private const SPLIT_MAX_PARTS = 20;
+
     /**
      * @param array<string, mixed> $filter
      * @return array<int, array<string, mixed>>
@@ -141,6 +153,10 @@ final class Repo
             $where[] = 't.date <= ?';
             $params[] = Validate::date($filter['to']);
         }
+        if (isset($filter['splitGroup']) && $filter['splitGroup'] !== '') {
+            $where[] = 't.split_group = ?';
+            $params[] = Validate::intId($filter['splitGroup']);
+        }
         $search = trim((string)($filter['search'] ?? ''));
         if ($search !== '') {
             $like = '%' . strtolower(mb_substr($search, 0, 100)) . '%';
@@ -152,13 +168,7 @@ final class Repo
         $rows = DB::all(
             // time DESC puts NULLs (legacy rows / no time given) last within a
             // day on BOTH dialects (NULL sorts smallest), then id breaks ties.
-            'SELECT t.id, t.amount_cents AS amountCents, t.type, t.category_id AS categoryId,
-                    t.account_id AS accountId, t.date, t.time, t.note,
-                    c.name AS categoryName, c.color AS categoryColor,
-                    a.name AS accountName, a.color AS accountColor
-             FROM transactions t
-             LEFT JOIN categories c ON c.id = t.category_id
-             LEFT JOIN accounts a ON a.id = t.account_id
+            self::TX_SELECT . '
              WHERE ' . implode(' AND ', $where) . '
              ORDER BY t.date DESC, t.time DESC, t.id DESC
              LIMIT 2000',
@@ -181,6 +191,7 @@ final class Repo
             'date' => (string)$r['date'],
             'time' => $r['time'] === null ? null : (string)$r['time'],
             'note' => (string)$r['note'],
+            'splitGroup' => $r['splitGroup'] === null ? null : (int)$r['splitGroup'],
             'categoryName' => $r['categoryName'] === null ? null : (string)$r['categoryName'],
             'categoryColor' => $r['categoryColor'] === null ? null : (string)$r['categoryColor'],
             'accountId' => $r['accountId'] === null ? null : (int)$r['accountId'],
@@ -231,17 +242,7 @@ final class Repo
             [$uid, $amount, $type, $categoryId, $accountId, $date, $time, $note]
         );
         self::restoreOnActivity($uid, $accountId);
-        $row = DB::one(
-            'SELECT t.id, t.amount_cents AS amountCents, t.type, t.category_id AS categoryId,
-                    t.account_id AS accountId, t.date, t.time, t.note,
-                    c.name AS categoryName, c.color AS categoryColor,
-                    a.name AS accountName, a.color AS accountColor
-             FROM transactions t
-             LEFT JOIN categories c ON c.id = t.category_id
-             LEFT JOIN accounts a ON a.id = t.account_id
-             WHERE t.id = ? AND t.user_id = ?',
-            [$id, $uid]
-        );
+        $row = DB::one(self::TX_SELECT . ' WHERE t.id = ? AND t.user_id = ?', [$id, $uid]);
         assert($row !== null);
         return self::castTx($row);
     }
@@ -262,10 +263,217 @@ final class Repo
 
     public static function deleteTransaction(int $uid, int $id): void
     {
-        $count = DB::exec('DELETE FROM transactions WHERE id = ? AND user_id = ?', [$id, $uid]);
-        if ($count === 0) {
+        $row = DB::one('SELECT split_group FROM transactions WHERE id = ? AND user_id = ?', [$id, $uid]);
+        if ($row === null) {
             throw new ApiError('Transaction not found', 404);
         }
+        DB::exec('DELETE FROM transactions WHERE id = ? AND user_id = ?', [$id, $uid]);
+        if ($row['split_group'] !== null) {
+            // One part of a split: the rest of the receipt stays, keyed to a live row.
+            self::rekeySplit($uid, self::splitIds($uid, (int)$row['split_group']));
+        }
+    }
+
+    // ---------- split receipts ----------
+    //
+    // One receipt divided across categories: ordinary transactions that share
+    // the type, account, date, time and note, each in its own category, linked
+    // by split_group = the smallest id among them. Reports, budgets and
+    // balances need nothing special, since each part is a normal row.
+
+    /**
+     * @param array<string, mixed> $data { type, accountId, date, time, note, parts: [{ id?, categoryId, amountCents }] }
+     * @return array{0: string, 1: ?int, 2: string, 3: ?string, 4: string, 5: list<array{id: ?int, categoryId: ?int, amountCents: int}>}
+     */
+    private static function cleanSplitInput(int $uid, array $data, int $minParts): array
+    {
+        $type = Validate::type($data['type'] ?? null);
+        $accountId = Validate::accountIdOrNull($data['accountId'] ?? null);
+        if ($accountId !== null && self::assertAccountOwned($uid, $accountId) === 'loan') {
+            throw new ApiError('Transactions cannot be linked to a loan account', 422);
+        }
+        $date = Validate::date($data['date'] ?? null);
+        $time = Validate::timeHmOrNull($data['time'] ?? null);
+        $note = Validate::note($data['note'] ?? '');
+        $raw = $data['parts'] ?? null;
+        if (!is_array($raw) || array_values($raw) !== $raw || count($raw) < $minParts || count($raw) > self::SPLIT_MAX_PARTS) {
+            throw new ApiError($minParts > 1 ? 'A split needs 2 to 20 parts' : 'Give 1 to 20 parts', 422);
+        }
+        $parts = [];
+        $seen = [];
+        foreach ($raw as $part) {
+            if (!is_array($part)) {
+                throw new ApiError('Invalid split part', 422);
+            }
+            $id = ($part['id'] ?? null) === null ? null : Validate::intId($part['id']);
+            if ($id !== null) {
+                if (isset($seen[$id])) {
+                    throw new ApiError('A part is listed twice', 422);
+                }
+                $seen[$id] = true;
+            }
+            $categoryId = Validate::categoryIdOrNull($part['categoryId'] ?? null);
+            if ($categoryId !== null) {
+                self::assertCategoryOwned($uid, $categoryId, $type);
+            }
+            $parts[] = ['id' => $id, 'categoryId' => $categoryId, 'amountCents' => Validate::amountCents($part['amountCents'] ?? null)];
+        }
+        return [$type, $accountId, $date, $time, $note, $parts];
+    }
+
+    /** @return list<int> the ids of a split's parts */
+    private static function splitIds(int $uid, int $group): array
+    {
+        return array_map('intval', array_column(
+            DB::all('SELECT id FROM transactions WHERE user_id = ? AND split_group = ? ORDER BY id', [$uid, $group]),
+            'id'
+        ));
+    }
+
+    /**
+     * Points every part at the smallest id among them, so the key is always a
+     * live row (an id can't be reused while its row exists). A lone remaining
+     * part stops being a split.
+     * @param list<int> $ids
+     */
+    private static function rekeySplit(int $uid, array $ids): void
+    {
+        if ($ids === []) {
+            return;
+        }
+        DB::exec(
+            'UPDATE transactions SET split_group = ? WHERE user_id = ? AND id IN (' . implode(', ', array_fill(0, count($ids), '?')) . ')',
+            [count($ids) > 1 ? min($ids) : null, $uid, ...$ids]
+        );
+    }
+
+    /**
+     * @param list<int> $ids
+     * @return array<int, array<string, mixed>>
+     */
+    private static function txRows(int $uid, array $ids): array
+    {
+        return array_map([self::class, 'castTx'], DB::all(
+            self::TX_SELECT . ' WHERE t.user_id = ? AND t.id IN (' . implode(', ', array_fill(0, count($ids), '?')) . ') ORDER BY t.id',
+            [$uid, ...$ids]
+        ));
+    }
+
+    /** @param array{id: ?int, categoryId: ?int, amountCents: int} $part */
+    private static function insertSplitPart(int $uid, array $part, string $type, ?int $accountId, string $date, ?string $time, string $note): int
+    {
+        return DB::insert(
+            'INSERT INTO transactions (user_id, amount_cents, type, category_id, account_id, date, time, note)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [$uid, $part['amountCents'], $type, $part['categoryId'], $accountId, $date, $time, $note]
+        );
+    }
+
+    /**
+     * A new split receipt: 2–20 new parts, in one DB transaction.
+     * @param array<string, mixed> $data
+     * @return array<int, array<string, mixed>> the parts, by id
+     */
+    public static function createSplit(int $uid, array $data): array
+    {
+        [$type, $accountId, $date, $time, $note, $parts] = self::cleanSplitInput($uid, $data, 2);
+        foreach ($parts as $part) {
+            if ($part['id'] !== null) {
+                throw new ApiError('A new split cannot include existing transactions', 422);
+            }
+        }
+        $pdo = DB::pdo();
+        $pdo->beginTransaction();
+        try {
+            $ids = [];
+            foreach ($parts as $part) {
+                $ids[] = self::insertSplitPart($uid, $part, $type, $accountId, $date, $time, $note);
+            }
+            self::rekeySplit($uid, $ids);
+            self::restoreOnActivity($uid, $accountId);
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+        return self::txRows($uid, $ids);
+    }
+
+    /**
+     * Re-splits transaction $id's receipt (its split, or just it when it isn't
+     * one yet). Listed parts keep their id, so links to them (Schedule
+     * payments) survive; parts without an id are added; parts of the receipt
+     * left out are deleted. One part turns it back into an ordinary
+     * transaction. Shared fields are written to every part.
+     * @param array<string, mixed> $data
+     * @return array<int, array<string, mixed>> the parts, by id
+     */
+    public static function updateSplit(int $uid, int $id, array $data): array
+    {
+        [$type, $accountId, $date, $time, $note, $parts] = self::cleanSplitInput($uid, $data, 1);
+        $row = DB::one('SELECT split_group FROM transactions WHERE id = ? AND user_id = ?', [$id, $uid]);
+        if ($row === null) {
+            throw new ApiError('Transaction not found', 404);
+        }
+        $current = $row['split_group'] === null ? [$id] : self::splitIds($uid, (int)$row['split_group']);
+        foreach ($parts as $part) {
+            if ($part['id'] !== null && !in_array($part['id'], $current, true)) {
+                throw new ApiError('A part belongs to a different transaction', 422);
+            }
+        }
+        $pdo = DB::pdo();
+        $pdo->beginTransaction();
+        try {
+            $kept = [];
+            $added = false;
+            foreach ($parts as $part) {
+                if ($part['id'] !== null) {
+                    DB::exec(
+                        'UPDATE transactions SET amount_cents = ?, type = ?, category_id = ?, account_id = ?, date = ?, time = ?, note = ?
+                         WHERE id = ? AND user_id = ?',
+                        [$part['amountCents'], $type, $part['categoryId'], $accountId, $date, $time, $note, $part['id'], $uid]
+                    );
+                    $kept[] = $part['id'];
+                } else {
+                    $kept[] = self::insertSplitPart($uid, $part, $type, $accountId, $date, $time, $note);
+                    $added = true;
+                }
+            }
+            $dropped = array_values(array_diff($current, $kept));
+            if ($dropped !== []) {
+                DB::exec(
+                    'DELETE FROM transactions WHERE user_id = ? AND id IN (' . implode(', ', array_fill(0, count($dropped), '?')) . ')',
+                    [$uid, ...$dropped]
+                );
+            }
+            self::rekeySplit($uid, $kept);
+            if ($added) {
+                self::restoreOnActivity($uid, $accountId); // a new part is new activity
+            }
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+        return self::txRows($uid, $kept);
+    }
+
+    /** Deletes transaction $id and, when it's part of a split, every other part. */
+    public static function deleteSplit(int $uid, int $id): void
+    {
+        $row = DB::one('SELECT split_group FROM transactions WHERE id = ? AND user_id = ?', [$id, $uid]);
+        if ($row === null) {
+            throw new ApiError('Transaction not found', 404);
+        }
+        if ($row['split_group'] === null) {
+            DB::exec('DELETE FROM transactions WHERE id = ? AND user_id = ?', [$id, $uid]);
+            return;
+        }
+        DB::exec('DELETE FROM transactions WHERE user_id = ? AND split_group = ?', [$uid, (int)$row['split_group']]);
     }
 
     // ---------- accounts ----------
