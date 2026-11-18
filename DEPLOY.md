@@ -150,3 +150,16 @@ Rebuild (`npm run build && npm run assemble`) and re-upload everything **except*
 | Pages 404 on refresh | `.htaccess` didn't upload, or `mod_rewrite` is off (it's on by default on Hostinger). |
 | AI chat doesn't appear | `'ai' => ['api_key' => …]` is missing or empty in `config.php`. |
 | AI chat says "not set up correctly" | The key is wrong or the model was retired: the hPanel error log has the provider's message. Set a current model from console.groq.com/docs/models as `'model'`. |
+
+## Scheduled emails (reminders and the monthly recap)
+
+Both are opt-in per user (Settings) and sent by one script, run every hour:
+
+1. In the server's `api/app/config.php`, set `'mail_from' => 'you@yourdomain'` to a real mailbox on the domain. Without it the script refuses to send (from cron there's no web host, so mail would go out as `noreply@localhost` and be rejected or junked).
+2. hPanel → Advanced → Cron Jobs → add an hourly job running the PHP 8.3 CLI (SSH's default `php` is 8.2):
+
+   ```
+   /opt/alt/php83/usr/bin/php <public_html>/api/app/cron/send-reminders.php
+   ```
+
+The reminder email goes out from 7 AM in each user's time zone on days something needs their attention; the monthly recap from 7 AM on the 1st, about the month before. To see what would be sent without sending anything, run the same command with `--dry-run` over SSH.

@@ -9,6 +9,8 @@ Built to run on **Hostinger shared hosting** (hPanel) with no build tools requir
 - **Database**: MySQL / MariaDB in production (SQLite supported for local dev). Schema auto-creates on first request.
 - **Auth**: server-side sessions (HttpOnly cookie) + CSRF tokens; passwords hashed with `password_hash`; Google ID tokens verified server-side.
 
+What it does: transactions (with split receipts and bank statement CSV import with category rules), accounts with net worth over time and card limits, recurring budgets with optional rollover, auto-charged subscriptions, a payment schedule (payday planner, 60-day cash forecast with one-click fixes for shortfalls, calendar, debt payoff with interest, savings goals), reminder emails and a monthly recap email, and an optional AI chat that answers questions about your own data.
+
 ## What ships to the server
 
 `npm run build && npm run assemble` produces `deploy/`, which is the entire site to upload:
@@ -57,7 +59,7 @@ php -S 127.0.0.1:8124 -t deploy deploy/router.php
 API_BASE=http://127.0.0.1:8124 npm run test:api
 ```
 
-`test/api-test.mjs` is a 48-assertion end-to-end suite covering auth (register/login/logout, session, CSRF, throttling), full CRUD, report math, budget upsert/copy, foreign-key behavior, and cross-user data isolation. It has been run green against both SQLite and MariaDB 10.4.
+`test/api-test.mjs` is a ~470-assertion end-to-end suite covering auth, email verification, every API area, cross-user data isolation, the reminder and monthly recap job, and the AI chat against a fake provider. It also needs `MAIL_LOG` (and `REMINDERS_CRON`, `PHP_BIN`, `AI_MOCK_PORT` for the job and chat sections); see CLAUDE.md for the full command. It runs green against both SQLite and MariaDB. `npm test` runs the unit tests (no server needed).
 
 ## Security model
 
