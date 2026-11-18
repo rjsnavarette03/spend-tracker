@@ -351,6 +351,40 @@ export interface SchedulePayResult {
   transaction: Transaction | null; // income/bill/allowance
 }
 
+// ---------- importing a bank statement ----------
+// The browser reads the CSV, maps its columns and the user reviews each line;
+// POST /import saves the kept lines as ordinary transactions on one debit or
+// credit account, all or nothing.
+
+export interface ImportRow {
+  date: string; // YYYY-MM-DD
+  amountCents: number; // > 0
+  type: TxType;
+  categoryId: number | null;
+  note: string; // the statement's description
+}
+
+export interface ImportInput {
+  accountId: number;
+  rows: ImportRow[]; // 1–1000
+}
+
+export interface ImportResult {
+  imported: number;
+  ids: number[];
+}
+
+// "Description contains <keyword>" → category, remembered between imports.
+// keyword is lowercase; a rule only applies to lines of its category's type.
+export interface ImportRule {
+  id: number;
+  keyword: string;
+  categoryId: number;
+  categoryName: string;
+  categoryColor: string;
+  categoryType: TxType;
+}
+
 export interface MonthlySummary {
   month: string; // YYYY-MM
   incomeCents: number;
@@ -482,6 +516,13 @@ export interface Api {
     // Removes the plan only; payments already made stay in the ledger.
     removeItem(id: number): Promise<void>;
     pay(data: SchedulePayInput): Promise<SchedulePayResult>;
+  };
+  imports: {
+    run(data: ImportInput): Promise<ImportResult>;
+    rules(): Promise<ImportRule[]>;
+    // Saving a keyword that exists moves it to the new category.
+    saveRule(keyword: string, categoryId: number): Promise<ImportRule>;
+    removeRule(id: number): Promise<void>;
   };
   reminders: {
     // The token from a reminder email's link; needs no session. Only turns

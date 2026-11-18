@@ -297,6 +297,28 @@ try {
         throw new ApiError('Not found', 404);
     }
 
+    // ---------- importing a bank statement ----------
+    if ($resource === 'import') {
+        $id = $seg[2] ?? '';
+        if ($method === 'POST' && $sub === '') {
+            // Larger body cap: up to 1,000 rows.
+            Http::json(Repo::importTransactions($uid, Http::readJson(1024 * 1024)), 201);
+        }
+        if ($sub === 'rules') {
+            if ($method === 'GET' && $id === '') {
+                Http::json(Repo::listImportRules($uid));
+            }
+            if ($method === 'POST' && $id === '') {
+                Http::json(Repo::saveImportRule($uid, Http::readJson()), 201);
+            }
+            if ($method === 'DELETE' && $id !== '') {
+                Repo::deleteImportRule($uid, Validate::intId($id));
+                Http::json(['ok' => true]);
+            }
+        }
+        throw new ApiError('Not found', 404);
+    }
+
     // ---------- transfers ----------
     if ($resource === 'transfers') {
         if ($method === 'GET' && $sub === '') {

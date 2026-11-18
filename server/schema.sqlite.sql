@@ -204,8 +204,7 @@ CREATE INDEX IF NOT EXISTS idx_schedule_payments_transfer ON schedule_payments(t
 
 CREATE INDEX IF NOT EXISTS idx_schedule_payments_tx ON schedule_payments(transaction_id);
 
--- Reminders already emailed (see MySQL schema). Newest table:
--- DB::ensureSchema probes it to decide whether to replay the schema.
+-- Reminders already emailed (see MySQL schema).
 CREATE TABLE IF NOT EXISTS reminder_sends (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -215,3 +214,16 @@ CREATE TABLE IF NOT EXISTS reminder_sends (
 );
 
 CREATE INDEX IF NOT EXISTS idx_reminder_sends_sent ON reminder_sends(sent_on);
+
+-- Bank statement import rules (see MySQL schema). Newest table:
+-- DB::ensureSchema probes it to decide whether to replay the schema.
+CREATE TABLE IF NOT EXISTS import_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    keyword TEXT NOT NULL,
+    category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (user_id, keyword)
+);
+
+CREATE INDEX IF NOT EXISTS idx_import_rules_category ON import_rules(category_id);

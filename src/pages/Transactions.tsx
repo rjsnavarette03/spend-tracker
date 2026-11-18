@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Account, Category, Transaction, Transfer, TxType } from '../../shared/types';
 import { api } from '../api';
 import { confirm, toast } from '../components/feedback';
-import { DownloadIcon, PencilIcon, PlusIcon, TransferIcon, TrashIcon } from '../components/Icons';
+import { DownloadIcon, PencilIcon, PlusIcon, TransferIcon, TrashIcon, UploadIcon } from '../components/Icons';
+import { ImportModal } from '../components/ImportModal';
 import { Pager } from '../components/Pager';
 import { PeriodPicker } from '../components/PeriodPicker';
 import { TransactionModal } from '../components/TransactionModal';
@@ -127,6 +128,7 @@ export function Transactions({
   const [loaded, setLoaded] = useState(false);
   const [typeFilter, setTypeFilter] = useState<TxType | 'all' | 'transfer'>('all');
   const [catFilter, setCatFilter] = useState<string>('all');
+  const [importOpen, setImportOpen] = useState(false);
   const [modal, setModal] = useState<{ open: boolean; editing: Transaction | null }>({
     open: false,
     editing: null,
@@ -266,6 +268,9 @@ export function Transactions({
           </div>
         </div>
         <div className="head-actions">
+          <button className="btn" onClick={() => setImportOpen(true)} title="Import a bank statement (CSV)">
+            <UploadIcon /> Import
+          </button>
           <button className="btn" onClick={exportCsv} disabled={matched.length === 0}>
             <DownloadIcon /> Export CSV
           </button>
@@ -538,6 +543,14 @@ export function Transactions({
           initial={transferModal.editing}
           accounts={accounts}
           onClose={() => setTransferModal({ open: false, editing: null })}
+          onSaved={afterMutation}
+        />
+      )}
+      {importOpen && (
+        <ImportModal
+          accounts={accounts}
+          categories={categories}
+          onClose={() => setImportOpen(false)}
           onSaved={afterMutation}
         />
       )}

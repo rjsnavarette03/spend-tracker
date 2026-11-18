@@ -476,6 +476,147 @@ final class Repo
         DB::exec('DELETE FROM transactions WHERE user_id = ? AND split_group = ?', [$uid, (int)$row['split_group']]);
     }
 
+    // ---------- importing a bank statement ----------
+    //
+    // The browser does the bank-specific work: it reads the CSV, maps its
+    // columns, applies the rules below and flags lines already recorded, and
+    // the user reviews every row. The server only saves what they kept.
+
+    /** Most rows one import can save. */
+    private const IMPORT_MAX_ROWS = 1000;
+
+    /**
+     * Saves reviewed statement lines as ordinary transactions on one debit or
+     * credit account, all or nothing; a bad row names its position.
+     *
+     * @param array<string, mixed> $data { accountId, rows: [{ date, amountCents, type, categoryId, note }] }
+     * @return array{imported: int, ids: list<int>}
+     */
+    public static function importTransactions(int $uid, array $data): array
+    {
+        $accountId = Validate::intId($data['accountId'] ?? null);
+        if (self::assertAccountOwned($uid, $accountId) === 'loan') {
+            throw new ApiError('Import into a debit or credit account; loans are managed with transfers', 422);
+        }
+        $raw = $data['rows'] ?? null;
+        if (!is_array($raw) || array_values($raw) !== $raw || $raw === [] || count($raw) > self::IMPORT_MAX_ROWS) {
+            throw new ApiError('Import 1 to ' . self::IMPORT_MAX_ROWS . ' rows at a time', 422);
+        }
+        // Category types, read once instead of a query per row.
+        $types = [];
+        foreach (DB::all('SELECT id, type FROM categories WHERE user_id = ?', [$uid]) as $c) {
+            $types[(int)$c['id']] = (string)$c['type'];
+        }
+        $rows = [];
+        foreach ($raw as $i => $r) {
+            try {
+                if (!is_array($r)) {
+                    throw new ApiError('Invalid row', 422);
+                }
+                $type = Validate::type($r['type'] ?? null);
+                $categoryId = Validate::categoryIdOrNull($r['categoryId'] ?? null);
+                if ($categoryId !== null && ($types[$categoryId] ?? null) !== $type) {
+                    throw new ApiError('Invalid category', 422);
+                }
+                $rows[] = [
+                    Validate::amountCents($r['amountCents'] ?? null),
+                    $type,
+                    $categoryId,
+                    Validate::date($r['date'] ?? null),
+                    Validate::note($r['note'] ?? ''),
+                ];
+            } catch (ApiError $e) {
+                throw new ApiError('Row ' . ($i + 1) . ': ' . $e->getMessage(), 422);
+            }
+        }
+        $pdo = DB::pdo();
+        $pdo->beginTransaction();
+        try {
+            $ids = [];
+            foreach ($rows as [$amount, $type, $categoryId, $date, $note]) {
+                $ids[] = DB::insert(
+                    'INSERT INTO transactions (user_id, amount_cents, type, category_id, account_id, date, note)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)',
+                    [$uid, $amount, $type, $categoryId, $accountId, $date, $note]
+                );
+            }
+            self::restoreOnActivity($uid, $accountId);
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+        return ['imported' => count($ids), 'ids' => $ids];
+    }
+
+    private const RULE_SELECT =
+        'SELECT r.id, r.keyword, r.category_id AS categoryId,
+                c.name AS categoryName, c.color AS categoryColor, c.type AS categoryType
+         FROM import_rules r
+         JOIN categories c ON c.id = r.category_id';
+
+    /**
+     * @param array<string, mixed> $r
+     * @return array<string, mixed>
+     */
+    private static function castRule(array $r): array
+    {
+        return [
+            'id' => (int)$r['id'],
+            'keyword' => (string)$r['keyword'],
+            'categoryId' => (int)$r['categoryId'],
+            'categoryName' => (string)$r['categoryName'],
+            'categoryColor' => (string)$r['categoryColor'],
+            'categoryType' => (string)$r['categoryType'],
+        ];
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    public static function listImportRules(int $uid): array
+    {
+        return array_map(
+            [self::class, 'castRule'],
+            DB::all(self::RULE_SELECT . ' WHERE r.user_id = ? ORDER BY r.keyword', [$uid])
+        );
+    }
+
+    /**
+     * "Description contains <keyword>" puts a statement line in a category on
+     * the next import. Keywords are stored lowercase (matching ignores case);
+     * saving one that exists moves it to the new category.
+     *
+     * @param array<string, mixed> $data { keyword, categoryId }
+     * @return array<string, mixed>
+     */
+    public static function saveImportRule(int $uid, array $data): array
+    {
+        $keyword = mb_strtolower(Validate::keywordOrNull($data['keyword'] ?? null) ?? '');
+        if (mb_strlen($keyword) < 2) {
+            throw new ApiError('Enter at least 2 characters to look for', 422);
+        }
+        $categoryId = Validate::intId($data['categoryId'] ?? null);
+        self::assertCategoryOwned($uid, $categoryId);
+        $existing = DB::one('SELECT id FROM import_rules WHERE user_id = ? AND keyword = ?', [$uid, $keyword]);
+        if ($existing !== null) {
+            $id = (int)$existing['id'];
+            DB::exec('UPDATE import_rules SET category_id = ? WHERE id = ? AND user_id = ?', [$categoryId, $id, $uid]);
+        } else {
+            $id = DB::insert('INSERT INTO import_rules (user_id, keyword, category_id) VALUES (?, ?, ?)', [$uid, $keyword, $categoryId]);
+        }
+        $row = DB::one(self::RULE_SELECT . ' WHERE r.id = ? AND r.user_id = ?', [$id, $uid]);
+        assert($row !== null);
+        return self::castRule($row);
+    }
+
+    public static function deleteImportRule(int $uid, int $id): void
+    {
+        if (DB::exec('DELETE FROM import_rules WHERE id = ? AND user_id = ?', [$id, $uid]) === 0) {
+            throw new ApiError('Rule not found', 404);
+        }
+    }
+
     // ---------- accounts ----------
 
     /**

@@ -4,6 +4,7 @@ import type {
   Api,
   AuthResponse,
   BudgetCadence,
+  ImportInput,
   MeResponse,
   ScheduleItemInput,
   SchedulePayInput,
@@ -225,6 +226,14 @@ export const api: Api = {
     updateItem: (id: number, data: ScheduleItemInput) => http('PUT', `/schedule/items/${id}`, data),
     removeItem: (id: number) => http('DELETE', `/schedule/items/${id}`),
     pay: (data: SchedulePayInput) => http('POST', '/schedule/pay', data),
+  },
+  imports: {
+    run: (data: ImportInput) => http('POST', '/import', data),
+    rules: () => http('GET', '/import/rules'),
+    saveRule: (keyword: string, categoryId: number) => http('POST', '/import/rules', { keyword, categoryId }),
+    removeRule: async (id: number) => {
+      await http<{ ok: boolean }>('DELETE', `/import/rules/${id}`);
+    },
   },
   reminders: {
     unsubscribe: async (token) => {

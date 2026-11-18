@@ -2631,6 +2631,93 @@ if (!REMINDERS_CRON) {
   await b.call('DELETE', `/categories/${bobCat}`);
 }
 
+// ---------- importing a bank statement (POST /import) and its rules ----------
+{
+  const cat = async (name, type, client = a) => (await client.call('POST', '/categories', { name, type, color: '#123456' })).data.id;
+  const eat = await cat('ImportEat', 'expense');
+  const pay = await cat('ImportPay', 'income');
+  const bobCat = await cat('BobImport', 'expense', b);
+  const acct = async (name, type, openingBalanceCents, client = a) =>
+    (await client.call('POST', '/accounts', { name, type, color: '#38bdf8', openingBalanceCents })).data;
+  const bank = await acct('Import Bank', 'debit', 100000);
+  const card = await acct('Import Card', 'credit', 0);
+  const loan = await acct('Import Loan', 'loan', 1000);
+  const bobBank = await acct('Bob Import', 'debit', 0, b);
+  const row = (over = {}) => ({ date: '2026-07-03', amountCents: 25000, type: 'expense', categoryId: eat, note: 'ImportProbe jollibee', ...over });
+  const mine = async () => (await a.call('GET', '/transactions?search=ImportProbe')).data;
+  const balance = async (id) => (await a.call('GET', '/accounts')).data.find((x) => x.id === id).balanceCents;
+
+  const ok = await a.call('POST', '/import', {
+    accountId: bank.id,
+    rows: [row(), row({ date: '2026-07-04', amountCents: 500000, type: 'income', categoryId: pay, note: 'ImportProbe salary' }), row({ categoryId: null, note: 'ImportProbe misc' })],
+  });
+  check('POST /import saves every row', ok.status === 201 && ok.data.imported === 3 && ok.data.ids.length === 3, `${ok.status} ${JSON.stringify(ok.data)}`);
+  const saved = await mine();
+  check('imported rows are ordinary transactions on the account',
+    saved.length === 3 && saved.every((t) => t.accountId === bank.id && t.time === null && t.splitGroup === null)
+      && saved.some((t) => t.type === 'income' && t.categoryId === pay && t.amountCents === 500000 && t.date === '2026-07-04')
+      && saved.some((t) => t.categoryId === null && t.note === 'ImportProbe misc'),
+    JSON.stringify(saved));
+  check('the account balance follows', (await balance(bank.id)) === 100000 - 25000 + 500000 - 25000);
+
+  const bad = async (label, body) => {
+    const r = await a.call('POST', '/import', body);
+    check(`${label} -> 422`, r.status === 422, `got ${r.status} ${JSON.stringify(r.data)}`);
+    return r;
+  };
+  await bad('importing into a loan', { accountId: loan.id, rows: [row()] });
+  await bad("importing into another user's account", { accountId: bobBank.id, rows: [row()] });
+  await bad('no rows', { accountId: bank.id, rows: [] });
+  await bad('1,001 rows', { accountId: bank.id, rows: Array.from({ length: 1001 }, () => row()) });
+  await bad('rows that are not a list', { accountId: bank.id, rows: { first: row() } });
+  const third = await bad('a bad row among good ones', { accountId: bank.id, rows: [row(), row(), row({ date: '2026-02-30' })] });
+  check('the error names the bad row', /^Row 3: /.test(third.data?.error ?? ''), third.data?.error);
+  await bad('a row in a category of the other type', { accountId: bank.id, rows: [row({ type: 'income' })] });
+  await bad("a row in another user's category", { accountId: bank.id, rows: [row({ categoryId: bobCat })] });
+  await bad('a zero amount', { accountId: bank.id, rows: [row({ amountCents: 0 })] });
+  check('a rejected import saves nothing', (await mine()).length === 3);
+
+  const onCard = await a.call('POST', '/import', { accountId: card.id, rows: [row({ note: 'ImportProbe card' })] });
+  check('a credit card takes imports too', onCard.status === 201 && (await balance(card.id)) === -25000);
+  const thousand = await a.call('POST', '/import', {
+    accountId: bank.id, rows: Array.from({ length: 1000 }, (_, i) => row({ amountCents: i + 1, note: 'ImportProbe bulk' })),
+  });
+  check('1,000 rows go in one import', thousand.status === 201 && thousand.data.imported === 1000, `${thousand.status} ${JSON.stringify(thousand.data).slice(0, 120)}`);
+
+  const rule = (keyword, categoryId, client = a) => client.call('POST', '/import/rules', { keyword, categoryId });
+  const r1 = await rule('  JolliBee ', eat);
+  check('a rule saves its keyword trimmed and lowercase, with its category',
+    r1.status === 201 && r1.data.keyword === 'jollibee' && r1.data.categoryId === eat && r1.data.categoryType === 'expense' && r1.data.categoryName === 'ImportEat',
+    JSON.stringify(r1.data));
+  await rule('salary', pay);
+  check('GET /import/rules lists them by keyword', (await a.call('GET', '/import/rules')).data.map((x) => x.keyword).join() === 'jollibee,salary');
+  const moved = await rule('JOLLIBEE', pay);
+  const after = (await a.call('GET', '/import/rules')).data;
+  check('saving an existing keyword moves it to the new category',
+    moved.data.id === r1.data.id && after.length === 2 && after.find((x) => x.keyword === 'jollibee')?.categoryId === pay);
+  for (const [label, keyword, categoryId] of [
+    ['a one-letter keyword', 'j', eat],
+    ['a blank keyword', '   ', eat],
+    ['a 61-character keyword', 'x'.repeat(61), eat],
+    ["another user's category", 'mcdo', bobCat],
+  ]) {
+    const r = await rule(keyword, categoryId);
+    check(`a rule with ${label} -> 422`, r.status === 422, `got ${r.status}`);
+  }
+  check("another user doesn't see the rules", (await b.call('GET', '/import/rules')).data.length === 0);
+  check("another user can't delete a rule", (await b.call('DELETE', `/import/rules/${r1.data.id}`)).status === 404);
+  const del = await a.call('DELETE', `/import/rules/${r1.data.id}`);
+  check('DELETE /import/rules/:id', del.status === 200 && (await a.call('GET', '/import/rules')).data.length === 1);
+  await a.call('DELETE', `/categories/${pay}`);
+  check('deleting a category removes its rules', (await a.call('GET', '/import/rules')).data.length === 0);
+
+  for (const id of [...ok.data.ids, ...onCard.data.ids, ...thousand.data.ids]) await a.call('DELETE', `/transactions/${id}`);
+  for (const x of [bank, card, loan]) await a.call('DELETE', `/accounts/${x.id}`);
+  await a.call('DELETE', `/categories/${eat}`);
+  await b.call('DELETE', `/accounts/${bobBank.id}`);
+  await b.call('DELETE', `/categories/${bobCat}`);
+}
+
 // ---------- accounts: credit limit, statement day, interest rate ----------
 {
   const base = { color: '#f87171', image: null, dueDay: null, dueDay2: null, openingBalanceCents: 36000 };

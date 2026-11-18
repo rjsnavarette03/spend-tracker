@@ -278,8 +278,7 @@ CREATE TABLE IF NOT EXISTS schedule_payments (
 
 -- Reminders already emailed, one row per reminder key ('soon|12|2026-11-05':
 -- stage|item|due date), so each stage of a due date is emailed once. Rows
--- older than 90 days are pruned by the reminders job. Newest table, so
--- DB::ensureSchema probes it to decide whether to replay the schema.
+-- older than 90 days are pruned by the reminders job.
 CREATE TABLE IF NOT EXISTS reminder_sends (
     id INT UNSIGNED NOT NULL AUTO_INCREMENT,
     user_id INT UNSIGNED NOT NULL,
@@ -289,4 +288,22 @@ CREATE TABLE IF NOT EXISTS reminder_sends (
     UNIQUE KEY uniq_reminder_sends_key (user_id, reminder_key),
     KEY idx_reminder_sends_sent (sent_on),
     CONSTRAINT fk_reminder_sends_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Bank statement import rules: a statement line whose description contains
+-- `keyword` goes in category_id. They're applied in the browser while an
+-- import is reviewed. keyword is stored lowercase, one rule per keyword.
+-- Newest table, so DB::ensureSchema probes it to decide whether to replay
+-- the schema.
+CREATE TABLE IF NOT EXISTS import_rules (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    user_id INT UNSIGNED NOT NULL,
+    keyword VARCHAR(60) NOT NULL,
+    category_id INT UNSIGNED NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uniq_import_rules_keyword (user_id, keyword),
+    KEY idx_import_rules_category (category_id),
+    CONSTRAINT fk_import_rules_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_import_rules_category FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

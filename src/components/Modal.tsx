@@ -8,10 +8,12 @@ export function Modal({
   title,
   onClose,
   children,
+  wide = false,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
+  wide?: boolean; // room for a table (the statement import's review step)
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -70,7 +72,7 @@ export function Modal({
       }}
     >
       <div
-        className="modal"
+        className={wide ? 'modal modal-wide' : 'modal'}
         ref={dialogRef}
         role="dialog"
         aria-modal="true"

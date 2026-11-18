@@ -80,7 +80,7 @@ final class DB
      * Auto-migrate on first use. Idempotent and self-healing — safe to run on
      * every connection, under concurrency, and after a partially-applied
      * upgrade (see tryDdl).
-     *   1. If the newest table (`reminder_sends`) is missing, replay the
+     *   1. If the newest table (`import_rules`) is missing, replay the
      *      full dialect schema (all CREATE ... IF NOT EXISTS — data preserved).
      *   2. Add columns that CREATE IF NOT EXISTS can't express — currently
      *      transactions.account_id, driven off the artifact that is created
@@ -92,10 +92,10 @@ final class DB
         $driver = (string)self::$pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
 
         // Step 1: create any missing tables. Probe the newest table
-        // (reminder_sends); if it's absent, replay the whole schema.
+        // (import_rules); if it's absent, replay the whole schema.
         $hasNewest = true;
         try {
-            self::$pdo->query('SELECT 1 FROM reminder_sends LIMIT 1');
+            self::$pdo->query('SELECT 1 FROM import_rules LIMIT 1');
         } catch (PDOException) {
             $hasNewest = false;
         }

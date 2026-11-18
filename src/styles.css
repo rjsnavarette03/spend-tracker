@@ -3023,6 +3023,114 @@ select {
   font-size: 13.5px;
 }
 
+/* Bank statement import (Transactions → Import). */
+.modal.modal-wide {
+  width: 920px;
+}
+
+.import-file {
+  align-self: flex-start;
+  cursor: pointer;
+}
+
+.import-preview,
+.import-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.import-table-wrap {
+  max-height: 46vh;
+}
+
+.import-table th,
+.import-table td {
+  vertical-align: top;
+}
+
+.import-table select {
+  min-width: 150px;
+}
+
+.import-date {
+  white-space: nowrap;
+}
+
+.import-off td:not(:first-child) {
+  opacity: 0.5;
+}
+
+.import-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.import-summary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px 12px;
+  font-size: 13.5px;
+}
+
+.import-rule-link {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.import-failed summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.import-failed ul {
+  max-height: 140px;
+  overflow: auto;
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
+.import-rules-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.import-rule-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.import-rule-list .cat-chip {
+  max-width: none;
+}
+
+.btn-icon.import-rule-x {
+  width: 20px;
+  height: 20px;
+}
+
+.import-rule-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 200px) auto;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+@media (max-width: 860px) {
+  .import-rule-form {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Split receipts: the tag on each part, and the parts list in the split form. */
 .split-tag {
   display: inline-block;
