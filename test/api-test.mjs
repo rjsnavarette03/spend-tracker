@@ -2063,6 +2063,128 @@ if (!REMINDERS_CRON) {
   await b.call('POST', '/auth/reminders', { enabled: false });
 }
 
+// ---------- the monthly recap email (setting, the job, its unsubscribe link) ----------
+{
+  const TZ = 'Asia/Manila'; // UTC+8 all year
+  const anon = new Client();
+  await anon.call('GET', '/auth/me');
+  check('recap: needs a signed-in user', (await anon.call('POST', '/auth/recap', { enabled: true, timezone: TZ })).status >= 401);
+  check('recap: enabled must be true or false -> 422', (await b.call('POST', '/auth/recap', { enabled: 'yes', timezone: TZ })).status === 422);
+  check('recap: an unknown time zone -> 422', (await b.call('POST', '/auth/recap', { enabled: true, timezone: 'Mars/Olympus' })).status === 422);
+  // Reminders off for now, so the job below only does Bob's recap.
+  await b.call('POST', '/auth/reminders', { enabled: false });
+  const on = await b.call('POST', '/auth/recap', { enabled: true, timezone: TZ });
+  check('POST /auth/recap turns it on with the time zone',
+    on.status === 200 && on.data.recapEmails === true && on.data.reminderTimezone === TZ, JSON.stringify(on.data));
+  check('/auth/me carries recapEmails', (await b.call('GET', '/auth/me')).data.user.recapEmails === true);
+
+  if (!REMINDERS_CRON) {
+    console.warn('  SKIPPED the monthly recap job: set REMINDERS_CRON (and PHP_BIN) to test it');
+  } else {
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    const [yy, mm] = today.split('-').map(Number);
+    const ym = (y, m) => {
+      const d = new Date(Date.UTC(y, m - 1, 1));
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+    };
+    const [prev, month, next, after] = [ym(yy, mm - 1), ym(yy, mm), ym(yy, mm + 1), ym(yy, mm + 2)];
+    const monthName = (m, withYear = false) =>
+      new Date(`${m}-01T00:00:00Z`).toLocaleDateString('en-US', { month: 'long', ...(withYear ? { year: 'numeric' } : {}), timeZone: 'UTC' });
+    const at = (day, hm) => `${day}T${hm}:00+08:00`;
+    const me = (await b.call('GET', '/auth/me')).data.user;
+    const job = (now, ...flags) => {
+      try {
+        return execFileSync(PHP_BIN, [REMINDERS_CRON, `--now=${now}`, `--user=${me.id}`, ...flags], { encoding: 'utf8' });
+      } catch (e) {
+        return `EXIT ${e.status}: ${e.stdout ?? ''}${e.stderr ?? ''}${e.message}`;
+      }
+    };
+    const recaps = () => mailBlocks(emailB).filter((m) => /^SUBJECT: Your .+ recap: /m.test(m));
+    const sentBefore = recaps().length;
+
+    const cat = async (name, type) => (await b.call('POST', '/categories', { name, type, color: '#123456' })).data.id;
+    const [food, rent, salary] = [await cat('Recap food', 'expense'), await cat('Recap rent', 'expense'), await cat('Recap salary', 'income')];
+    const bank = (await b.call('POST', '/accounts', { name: 'Recap bank', type: 'debit', color: '#38bdf8', openingBalanceCents: 0 })).data;
+    const tx = async (date, amountCents, type, categoryId) =>
+      (await b.call('POST', '/transactions', { amountCents, type, categoryId, accountId: bank.id, date, note: 'RecapProbe' })).data.id;
+    const made = [
+      await tx(`${month}-01`, 5000000, 'income', salary),
+      await tx(`${month}-01`, 2000000, 'expense', rent),
+      await tx(`${month}-01`, 1200000, 'expense', food),
+      await tx(`${prev}-15`, 3000000, 'expense', rent),
+    ];
+    await b.call('PUT', '/budgets', { categoryId: food, cadence: 'month', amountCents: 1000000 });
+
+    // What the email should say, from the same reports the app shows.
+    const money = (c) => new Intl.NumberFormat('en-US', { style: 'currency', currency: me.currency }).format(c / 100);
+    const change = (now, before, than) =>
+      now === before ? (now === 0 ? '' : ` (same as ${than})`) : ` (${now > before ? 'up' : 'down'} ${money(Math.abs(now - before))} from ${than})`;
+    const sum = (await b.call('GET', `/reports/summary?month=${month}`)).data;
+    const psum = (await b.call('GET', `/reports/summary?month=${prev}`)).data;
+    const top = (await b.call('GET', `/reports/breakdown?month=${month}&type=expense`)).data.slice(0, 3);
+
+    const thisMonth = job(at(today, '08:00'));
+    check("recap job: turning it on doesn't send last month's recap", thisMonth.includes(`${prev} already done`) && recaps().length === sentBefore, thisMonth);
+    const early = job(at(`${next}-01`, '06:30'));
+    check('recap job: before 7 AM on the 1st, not yet', early.includes('recap') && early.includes('not yet') && recaps().length === sentBefore, early);
+    const dry = job(at(`${next}-01`, '07:10'), '--dry-run');
+    check('recap job --dry-run prints the email and sends nothing',
+      dry.includes(`would send the ${month} recap`) && dry.includes('MONEY IN AND OUT') && recaps().length === sentBefore, dry);
+    const sent = job(at(`${next}-01`, '07:30'));
+    const mail = recaps()[0] ?? '';
+    check("recap job: from 7 AM on the 1st it sends last month's recap", sent.includes(`sent the ${month} recap`) && recaps().length === sentBefore + 1, sent);
+    check('recap email: the subject names the month and what was spent',
+      mail.includes(`SUBJECT: Your ${monthName(month, true)} recap: ${money(sum.expenseCents)} spent`), mail.slice(0, 300));
+    check('recap email: income and spending against the month before',
+      mail.includes(`Hello Bob,\n\nHere's your ${monthName(month, true)} in SpendTracker.`)
+        && mail.includes(`  - Income: ${money(sum.incomeCents)}${change(sum.incomeCents, psum.incomeCents, monthName(prev))}\n`)
+        && mail.includes(`  - Spending: ${money(sum.expenseCents)}${change(sum.expenseCents, psum.expenseCents, monthName(prev))}\n`),
+      mail);
+    check('recap email: the top categories with their share',
+      top.length > 0 && top.every((t) => mail.includes(`  - ${t.name}: ${money(t.totalCents)} (${Math.round((t.totalCents / sum.expenseCents) * 100)}%)\n`)),
+      mail);
+    check('recap email: a monthly budget that went over', mail.includes(`  - Over: Recap food, ${money(1200000)} of ${money(1000000)}\n`), mail);
+    check('recap email: net worth at the month end', mail.includes(`NET WORTH AT THE END OF ${monthName(month).toUpperCase()}\n  - Net worth: `), mail);
+    const token = mail.match(/\/\?unsubscribe=([a-f0-9]{64})&list=recap/)?.[1];
+    check('recap email: its own unsubscribe link and one-click headers',
+      !!token && mail.includes(`/api/reminders/unsubscribe?token=${token}&list=recap>`) && mail.includes('List-Unsubscribe-Post: List-Unsubscribe=One-Click'),
+      mail);
+
+    const again = job(at(`${next}-01`, '09:00'));
+    const later = job(at(`${next}-20`, '08:00'));
+    check('recap job: once a month', again.includes(`${month} already done`) && later.includes(`${month} already done`) && recaps().length === sentBefore + 1, again + later);
+    const empty = job(at(`${after}-01`, '07:30'));
+    check('recap job: a month with nothing recorded sends nothing', empty.includes(`nothing recorded in ${next}, no email`) && recaps().length === sentBefore + 1, empty);
+
+    // The unsubscribe link turns off the recap only.
+    const get = await fetch(`${BASE}/api/reminders/unsubscribe?token=${token}&list=recap`, { redirect: 'manual' });
+    check('GET on the recap link only redirects to the app screen',
+      get.status === 302 && get.headers.get('location') === `/?unsubscribe=${token}&list=recap` && (await b.call('GET', '/auth/me')).data.user.recapEmails === true,
+      `${get.status} ${get.headers.get('location')}`);
+    await b.call('POST', '/auth/reminders', { enabled: true, timezone: TZ });
+    const oneClick = (url) =>
+      fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'List-Unsubscribe=One-Click' });
+    const wrongList = await oneClick(`${BASE}/api/reminders/unsubscribe?token=${token}`);
+    check("the recap token can't turn off the reminders", wrongList.status === 400 && (await b.call('GET', '/auth/me')).data.user.reminderEmails === true);
+    const off = await oneClick(`${BASE}/api/reminders/unsubscribe?token=${token}&list=recap`);
+    const after1 = (await b.call('GET', '/auth/me')).data.user;
+    check('one-click on the recap link turns off the recap and leaves the reminders on',
+      off.status === 200 && after1.recapEmails === false && after1.reminderEmails === true, JSON.stringify(after1));
+    check('a second click still succeeds', (await oneClick(`${BASE}/api/reminders/unsubscribe?token=${token}&list=recap`)).status === 200);
+    await b.call('POST', '/auth/recap', { enabled: true, timezone: TZ });
+    check('turning it back on retires the old link', (await oneClick(`${BASE}/api/reminders/unsubscribe?token=${token}&list=recap`)).status === 400);
+
+    for (const id of made) await b.call('DELETE', `/transactions/${id}`);
+    await b.call('PUT', '/budgets', { categoryId: food, cadence: 'month', amountCents: 0 });
+    await b.call('DELETE', `/accounts/${bank.id}`);
+    for (const id of [food, rent, salary]) await b.call('DELETE', `/categories/${id}`);
+  }
+
+  const offed = await b.call('POST', '/auth/recap', { enabled: false });
+  check('POST /auth/recap turns it off', offed.status === 200 && offed.data.recapEmails === false);
+  await b.call('POST', '/auth/reminders', { enabled: false });
+}
+
 // ---------- accounts: archive settled accounts ----------
 // Archiving hides a settled account (balance exactly 0) without touching its
 // history, unlike delete; new activity on it brings it back.

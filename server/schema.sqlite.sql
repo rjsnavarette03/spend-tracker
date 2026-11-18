@@ -15,6 +15,9 @@ CREATE TABLE IF NOT EXISTS users (
     timezone TEXT NULL,
     reminders_run_on TEXT NULL,
     reminder_token TEXT NULL,
+    recap_emails INTEGER NOT NULL DEFAULT 0,
+    recap_sent_month TEXT NULL,
+    recap_token TEXT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

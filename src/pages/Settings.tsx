@@ -91,6 +91,18 @@ export function Settings({ user, refreshUser }: { user: User; refreshUser: () =>
     setReminderTz(user.reminderTimezone);
   }, [user.reminderEmails, user.reminderTimezone]);
 
+  // The monthly recap switches right away too, and shares the time zone.
+  const [recapOn, setRecapOn] = useState(user.recapEmails);
+  const [savingRecap, setSavingRecap] = useState(false);
+  const [recapError, setRecapError] = useState('');
+  useEffect(() => setRecapOn(user.recapEmails), [user.recapEmails]);
+  const today = new Date();
+  const thisMonth = today.toLocaleDateString('en-US', { month: 'long' });
+  const nextFirst = new Date(today.getFullYear(), today.getMonth() + 1, 1).toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+  });
+
   // Danger zone: the delete confirmation is revealed on demand.
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deletePw, setDeletePw] = useState('');
@@ -179,6 +191,22 @@ export function Settings({ user, refreshUser }: { user: User; refreshUser: () =>
       setRemindersError(cleanError(err));
     } finally {
       setSavingReminders(false);
+    }
+  };
+
+  const saveRecap = async (enabled: boolean) => {
+    setRecapError('');
+    setSavingRecap(true);
+    try {
+      const r = await api.auth.setRecap(enabled, enabled ? deviceTz : null);
+      setRecapOn(r.recapEmails);
+      setReminderTz(r.reminderTimezone);
+      refreshUser();
+      toast.success(enabled ? 'Monthly recap on' : 'Monthly recap off');
+    } catch (err) {
+      setRecapError(cleanError(err));
+    } finally {
+      setSavingRecap(false);
     }
   };
 
@@ -320,6 +348,47 @@ export function Settings({ user, refreshUser }: { user: User; refreshUser: () =>
             </div>
           )}
           {remindersError && <div className="form-error" role="alert">{remindersError}</div>}
+        </div>
+
+        <div className="panel form-grid">
+          <div className="panel-title" style={{ marginBottom: 0 }}>
+            Monthly recap
+          </div>
+          <div className="field-hint">
+            An email on the 1st of each month about the month before: income and spending compared with the month
+            before that, where the money went, monthly budgets that went over, and your net worth and debt.
+          </div>
+          <div className="field">
+            <label id="set-recap">Monthly recap email</label>
+            <div className="segmented" role="group" aria-labelledby="set-recap" style={{ alignSelf: 'flex-start' }}>
+              <button
+                type="button"
+                className={!recapOn ? 'active-account' : ''}
+                aria-pressed={!recapOn}
+                disabled={savingRecap}
+                onClick={() => recapOn && void saveRecap(false)}
+              >
+                Off
+              </button>
+              <button
+                type="button"
+                className={recapOn ? 'active-account' : ''}
+                aria-pressed={recapOn}
+                disabled={savingRecap}
+                onClick={() => !recapOn && void saveRecap(true)}
+              >
+                On
+              </button>
+            </div>
+            {recapOn && (
+              <div className="field-hint">
+                Sent to {user.email} around {REMINDER_EMAIL_HOUR}:00 AM
+                {reminderTz ? ` ${zoneCity(reminderTz)} time` : ''} on the 1st. The next one, about {thisMonth}, comes
+                on {nextFirst}. If it doesn't arrive, check spam.
+              </div>
+            )}
+          </div>
+          {recapError && <div className="form-error" role="alert">{recapError}</div>}
         </div>
 
         {/* Categories has no slot in the mobile tab bar, so it's reached from here. */}

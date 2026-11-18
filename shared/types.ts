@@ -17,7 +17,10 @@ export interface User {
   // Daily reminder emails (opt-in, off by default), sent around 7 AM in
   // reminderTimezone — the IANA zone saved from the browser when turned on.
   reminderEmails: boolean;
-  reminderTimezone: string | null;
+  reminderTimezone: string | null; // shared with the monthly recap
+  // The monthly recap email (opt-in): sent on the 1st around 7 AM in
+  // reminderTimezone, about the month before.
+  recapEmails: boolean;
 }
 
 export interface Category {
@@ -460,6 +463,12 @@ export interface Api {
       enabled: boolean,
       timezone: string | null
     ): Promise<{ reminderEmails: boolean; reminderTimezone: string | null }>;
+    // The monthly recap email on/off; turning it on needs the browser's IANA
+    // time zone (shared with the reminder emails).
+    setRecap(
+      enabled: boolean,
+      timezone: string | null
+    ): Promise<{ recapEmails: boolean; reminderTimezone: string | null }>;
     // Permanently deletes the user and (via DB cascades) all their data.
     // Accounts with a password must re-confirm it; pass '' for Google-only.
     deleteAccount(currentPassword: string): Promise<void>;
@@ -525,9 +534,9 @@ export interface Api {
     removeRule(id: number): Promise<void>;
   };
   reminders: {
-    // The token from a reminder email's link; needs no session. Only turns
-    // reminder emails off.
-    unsubscribe(token: string): Promise<void>;
+    // The token from an email's unsubscribe link; needs no session. Only turns
+    // that email off: the daily reminders, or the monthly recap.
+    unsubscribe(token: string, list?: 'reminders' | 'recap'): Promise<void>;
   };
   reports: {
     summary(from: string, to: string): Promise<MonthlySummary>;

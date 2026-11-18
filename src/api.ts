@@ -156,6 +156,11 @@ export const api: Api = {
         enabled,
         timezone,
       }),
+    setRecap: (enabled, timezone) =>
+      http<{ ok: boolean; recapEmails: boolean; reminderTimezone: string | null }>('POST', '/auth/recap', {
+        enabled,
+        timezone,
+      }),
     deleteAccount: async (currentPassword) => {
       await http<{ ok: boolean }>('POST', '/auth/delete-account', { currentPassword });
       setCsrf(''); // the session died with the account
@@ -236,8 +241,8 @@ export const api: Api = {
     },
   },
   reminders: {
-    unsubscribe: async (token) => {
-      await http<{ ok: boolean }>('POST', '/reminders/unsubscribe', { token });
+    unsubscribe: async (token, list = 'reminders') => {
+      await http<{ ok: boolean }>('POST', '/reminders/unsubscribe', { token, list });
     },
   },
   reports: {

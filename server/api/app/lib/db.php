@@ -308,6 +308,19 @@ final class DB
         if ($driver === 'sqlite') {
             self::tryDdl('CREATE INDEX IF NOT EXISTS idx_transactions_split ON transactions(user_id, split_group)');
         }
+
+        // Step 16: the monthly recap email (opt-in, so off on every existing
+        // account).
+        $recapCols = [
+            'recap_emails' => ['INTEGER NOT NULL DEFAULT 0', 'TINYINT(1) NOT NULL DEFAULT 0'],
+            'recap_sent_month' => ['TEXT NULL', 'CHAR(7) NULL'],
+            'recap_token' => ['TEXT NULL', 'CHAR(64) NULL'],
+        ];
+        foreach ($recapCols as $name => [$sqliteType, $mysqlType]) {
+            if (!self::columnExists('users', $name)) {
+                self::tryDdl("ALTER TABLE users ADD COLUMN $name " . ($driver === 'sqlite' ? $sqliteType : $mysqlType));
+            }
+        }
     }
 
     /**

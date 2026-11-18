@@ -57,9 +57,14 @@ function clearVerifyParam(): void {
 function readUnsubscribeToken(): string | null {
   return new URLSearchParams(window.location.search).get('unsubscribe');
 }
+// &list=recap: the link came from the monthly recap, not the reminders.
+function readUnsubscribeList(): 'reminders' | 'recap' {
+  return new URLSearchParams(window.location.search).get('list') === 'recap' ? 'recap' : 'reminders';
+}
 function clearUnsubscribeParam(): void {
   const url = new URL(window.location.href);
   url.searchParams.delete('unsubscribe');
+  url.searchParams.delete('list');
   window.history.replaceState({}, '', url.pathname + url.search + url.hash);
 }
 
@@ -124,6 +129,7 @@ export function AppRoot() {
   const [resetToken, setResetToken] = useState<string | null>(readResetToken);
   const [verifyToken, setVerifyToken] = useState<string | null>(readVerifyToken);
   const [unsubscribeToken, setUnsubscribeToken] = useState<string | null>(readUnsubscribeToken);
+  const [unsubscribeList] = useState(readUnsubscribeList);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -242,6 +248,7 @@ export function AppRoot() {
     return (
       <Unsubscribe
         token={unsubscribeToken}
+        list={unsubscribeList}
         onDone={async (changed) => {
           clearUnsubscribeParam();
           if (phase === 'authed') await check();

@@ -8,7 +8,7 @@ final class Auth
     /** Wrong-code guesses allowed before a code is burned (resend required). */
     private const MAX_CODE_ATTEMPTS = 6;
     /** The users columns publicUser() reads. */
-    private const USER_COLS = 'id, email, name, password_hash, google_sub, currency, email_verified, reminder_emails, timezone';
+    private const USER_COLS = 'id, email, name, password_hash, google_sub, currency, email_verified, reminder_emails, timezone, recap_emails';
 
     public static function requireUser(): int
     {
@@ -70,6 +70,7 @@ final class Auth
             // nobody is locked out mid-deploy.
             'emailVerified' => !array_key_exists('email_verified', $u) || (int)$u['email_verified'] === 1,
             'reminderEmails' => (int)($u['reminder_emails'] ?? 0) === 1,
+            'recapEmails' => (int)($u['recap_emails'] ?? 0) === 1,
             'reminderTimezone' => isset($u['timezone']) ? (string)$u['timezone'] : null,
         ];
     }
@@ -124,24 +125,63 @@ final class Auth
     }
 
     /**
-     * Turn reminder emails off with the token from an email's unsubscribe
-     * link. No session needed: the link is opened from a mailbox, possibly on
-     * another device, and mail providers POST to it from their own servers for
-     * one-click unsubscribe. The token can do nothing else, and it keeps
-     * working after use, so a second click still succeeds.
+     * The monthly recap email on or off (opt-in). Turning it on saves the
+     * device's time zone (shared with the reminder emails, so the user has one
+     * "7 AM"). From off it also makes a new unsubscribe token and marks last
+     * month as recapped: the first recap is this month's, on the 1st of next.
+     *
+     * @return array{recapEmails: bool, reminderTimezone: string|null}
      */
-    public static function unsubscribeReminders(mixed $token): void
+    public static function setRecap(int $uid, mixed $enabled, mixed $timezone): array
+    {
+        if (!is_bool($enabled)) {
+            throw new ApiError('enabled must be true or false', 422);
+        }
+        $u = DB::one('SELECT recap_emails, timezone, recap_token FROM users WHERE id = ?', [$uid]);
+        if ($u === null) {
+            throw new ApiError('Not signed in', 401);
+        }
+        if (!$enabled) {
+            DB::exec('UPDATE users SET recap_emails = 0 WHERE id = ?', [$uid]);
+            return ['recapEmails' => false, 'reminderTimezone' => isset($u['timezone']) ? (string)$u['timezone'] : null];
+        }
+        $timezone = Validate::timezone($timezone);
+        if ((int)$u['recap_emails'] === 1 && $u['recap_token'] !== null) {
+            DB::exec('UPDATE users SET timezone = ? WHERE id = ?', [$timezone, $uid]);
+        } else {
+            $lastMonth = (new DateTimeImmutable('now', new DateTimeZone($timezone)))->modify('first day of last month')->format('Y-m');
+            DB::exec(
+                'UPDATE users SET recap_emails = 1, timezone = ?, recap_token = ?, recap_sent_month = ? WHERE id = ?',
+                [$timezone, bin2hex(random_bytes(32)), $lastMonth, $uid]
+            );
+        }
+        return ['recapEmails' => true, 'reminderTimezone' => $timezone];
+    }
+
+    /**
+     * Turn an email off with the token from its unsubscribe link: the daily
+     * reminders ('reminders') or the monthly recap ('recap'), each with its
+     * own token. No session needed: the link is opened from a mailbox,
+     * possibly on another device, and mail providers POST to it from their own
+     * servers for one-click unsubscribe. The token can do nothing else, and it
+     * keeps working after use, so a second click still succeeds.
+     */
+    public static function unsubscribe(mixed $token, string $list = 'reminders'): void
     {
         Http::throttle('unsub:' . Http::clientIp(), 30, 900);
         $token = is_string($token) ? $token : '';
         if (!preg_match('/^[a-f0-9]{64}$/', $token)) {
             throw new ApiError('This unsubscribe link is invalid.', 400);
         }
-        $u = DB::one('SELECT id FROM users WHERE reminder_token = ?', [$token]);
+        $recap = $list === 'recap';
+        $u = DB::one('SELECT id FROM users WHERE ' . ($recap ? 'recap_token' : 'reminder_token') . ' = ?', [$token]);
         if ($u === null) {
-            throw new ApiError('This unsubscribe link is no longer valid. You can turn reminder emails off in Settings.', 400);
+            throw new ApiError(
+                'This unsubscribe link is no longer valid. You can turn ' . ($recap ? 'the monthly recap' : 'reminder emails') . ' off in Settings.',
+                400
+            );
         }
-        DB::exec('UPDATE users SET reminder_emails = 0 WHERE id = ?', [(int)$u['id']]);
+        DB::exec('UPDATE users SET ' . ($recap ? 'recap_emails' : 'reminder_emails') . ' = 0 WHERE id = ?', [(int)$u['id']]);
     }
 
     /**

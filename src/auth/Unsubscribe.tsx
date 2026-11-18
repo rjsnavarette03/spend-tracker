@@ -4,26 +4,50 @@ import { WalletIcon } from '../components/Icons';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { cleanError } from '../format';
 
-// The unsubscribe link in reminder emails (?unsubscribe=<token>). It asks
-// before turning anything off — mail scanners open links, people click — and
-// works signed in or out: the token alone is enough, and only turns reminder
-// emails off. (A mail provider's own one-click button posts to the API
-// directly and never shows this screen.)
+// The words for each email that has an unsubscribe link.
+const COPY = {
+  reminders: {
+    name: 'reminder emails',
+    ask: ['Turn off reminder emails?', "You'll stop getting SpendTracker's daily reminder emails. Reminders in the app stay on."],
+    done: ['Reminder emails are off', 'You can turn them back on anytime in Settings. Reminders in the app stay on.'],
+    unchanged: 'Your reminder emails are unchanged.',
+    button: 'Turn off reminder emails',
+    keep: 'Keep them',
+  },
+  recap: {
+    name: 'the monthly recap',
+    ask: ['Turn off the monthly recap?', "You'll stop getting SpendTracker's monthly recap email. Reminder emails stay as they are."],
+    done: ['The monthly recap is off', 'You can turn it back on anytime in Settings.'],
+    unchanged: 'Your monthly recap is unchanged.',
+    button: 'Turn off the monthly recap',
+    keep: 'Keep it',
+  },
+} as const;
+
+// The unsubscribe link in reminder and recap emails (?unsubscribe=<token>,
+// plus &list=recap for the recap). It asks before turning anything off —
+// mail scanners open links, people click — and works signed in or out: the
+// token alone is enough, and only turns that one email off. (A mail
+// provider's own one-click button posts to the API directly and never shows
+// this screen.)
 export function Unsubscribe({
   token,
+  list = 'reminders',
   onDone,
 }: {
   token: string;
-  onDone: (changed: boolean) => void | Promise<void>; // changed = reminder emails were turned off
+  list?: 'reminders' | 'recap';
+  onDone: (changed: boolean) => void | Promise<void>; // changed = the email was turned off
 }) {
+  const copy = COPY[list];
   const valid = /^[a-f0-9]{64}$/.test(token);
   const [state, setState] = useState<'ask' | 'busy' | 'done' | 'failed'>(valid ? 'ask' : 'failed');
-  const [error, setError] = useState(valid ? '' : 'This unsubscribe link is incomplete. You can turn reminder emails off in Settings.');
+  const [error, setError] = useState(valid ? '' : `This unsubscribe link is incomplete. You can turn ${copy.name} off in Settings.`);
 
   const unsubscribe = async () => {
     setState('busy');
     try {
-      await api.reminders.unsubscribe(token);
+      await api.reminders.unsubscribe(token, list);
       setState('done');
     } catch (err) {
       setError(cleanError(err));
@@ -32,11 +56,7 @@ export function Unsubscribe({
   };
 
   const [title, sub] =
-    state === 'done'
-      ? ['Reminder emails are off', 'You can turn them back on anytime in Settings. Reminders in the app stay on.']
-      : state === 'failed'
-        ? ["Couldn't use this link", 'Your reminder emails are unchanged.']
-        : ['Turn off reminder emails?', "You'll stop getting SpendTracker's daily reminder emails. Reminders in the app stay on."];
+    state === 'done' ? copy.done : state === 'failed' ? ["Couldn't use this link", copy.unchanged] : copy.ask;
 
   return (
     <div className="login-wrap">
@@ -61,10 +81,10 @@ export function Unsubscribe({
                 onClick={() => void unsubscribe()}
                 disabled={state === 'busy'}
               >
-                {state === 'busy' ? 'Turning off…' : 'Turn off reminder emails'}
+                {state === 'busy' ? 'Turning off…' : copy.button}
               </button>
               <button type="button" className="btn btn-block" onClick={() => void onDone(false)} disabled={state === 'busy'}>
-                Keep them
+                {copy.keep}
               </button>
             </>
           ) : (

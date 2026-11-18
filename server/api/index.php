@@ -85,21 +85,27 @@ try {
     // ---------- reminder emails: unsubscribe link ----------
     if ($tokenOnly) {
         $token = $_GET['token'] ?? null;
+        // Which email: the daily reminders, or the monthly recap (&list=recap).
+        $list = ($_GET['list'] ?? '') === 'recap' ? 'recap' : 'reminders';
         if ($method === 'GET') {
             // A mail client without one-click support opens the link in a
             // browser: hand over to the app's unsubscribe screen, which asks
             // before turning anything off (link scanners only GET).
             $token = is_string($token) && preg_match('/^[a-f0-9]{64}$/', $token) === 1 ? $token : '';
-            header('Location: /?unsubscribe=' . $token, true, 302);
+            header('Location: /?unsubscribe=' . $token . ($list === 'recap' ? '&list=recap' : ''), true, 302);
             exit;
         }
         if ($method === 'POST') {
             // One-click POSTs carry the token in the link and a form body;
             // the app's screen sends it as JSON instead.
             if ($token === null) {
-                $token = Http::readJson()['token'] ?? null;
+                $body = Http::readJson();
+                $token = $body['token'] ?? null;
+                if (($body['list'] ?? '') === 'recap') {
+                    $list = 'recap';
+                }
             }
-            Auth::unsubscribeReminders($token);
+            Auth::unsubscribe($token, $list);
             Http::json(['ok' => true]);
         }
         throw new ApiError('Not found', 404);
@@ -179,6 +185,13 @@ try {
             $b = Http::readJson();
             $currency = Auth::setCurrency($me, $b['currency'] ?? null);
             Http::json(['ok' => true, 'currency' => $currency]);
+        }
+        if ($method === 'POST' && $sub === 'recap') {
+            // The monthly recap email; verified only, like the reminders.
+            // CSRF-checked above.
+            $me = Auth::requireVerifiedUser();
+            $b = Http::readJson();
+            Http::json(['ok' => true] + Auth::setRecap($me, $b['enabled'] ?? null, $b['timezone'] ?? null));
         }
         if ($method === 'POST' && $sub === 'reminders') {
             // Verified only: reminders go to the account's email address.

@@ -1385,9 +1385,13 @@ final class Repo
      * point takes every entry (future-dated ones too), so it always equals
      * the card.
      *
+     * $endMonth (YYYY-MM) ends the history at that month instead (the monthly
+     * recap): its last point is that month's end, like the rest, and
+     * accounts added after it are left out.
+     *
      * @return array<int, array{month: string, assetsCents: int, liabilitiesCents: int, netCents: int}>
      */
-    public static function netWorthHistory(int $uid, mixed $months): array
+    public static function netWorthHistory(int $uid, mixed $months, ?string $endMonth = null): array
     {
         $n = is_numeric($months) ? (int)$months : 12;
         $n = max(1, min(60, $n));
@@ -1425,8 +1429,8 @@ final class Repo
             }
         }
 
-        $y = (int)date('Y');
-        $m = (int)date('n');
+        $isNow = $endMonth === null;
+        [$y, $m] = $isNow ? [(int)date('Y'), (int)date('n')] : array_map('intval', explode('-', Validate::month($endMonth)));
         $monthList = [];
         for ($i = $n - 1; $i >= 0; $i--) {
             $monthList[] = date('Y-m', (int)mktime(12, 0, 0, $m - $i, 1, $y));
@@ -1446,8 +1450,12 @@ final class Repo
             if ($firstEntry !== null && $firstEntry < $start) {
                 $start = $firstEntry;
             }
-            // An account whose only entries are dated ahead still exists today.
-            $start = min($start, $current);
+            if ($isNow) {
+                // An account whose only entries are dated ahead still exists today.
+                $start = min($start, $current);
+            } elseif ($start > $current) {
+                continue; // it didn't exist yet at that month's end
+            }
             if ($earliest === null || $start < $earliest) {
                 $earliest = $start;
             }
@@ -1458,7 +1466,7 @@ final class Repo
                 }
                 $balance = $opening;
                 foreach ($mine as $deltaMonth => $delta) {
-                    if ($deltaMonth <= $month || $month === $current) {
+                    if ($deltaMonth <= $month || ($isNow && $month === $current)) {
                         $balance += $delta;
                     }
                 }
@@ -1470,6 +1478,9 @@ final class Repo
             }
         }
 
+        if ($earliest === null) {
+            return []; // no account existed yet
+        }
         $out = [];
         foreach ($points as $month => $p) {
             if ($month < $earliest) {
@@ -1479,6 +1490,67 @@ final class Repo
             $out[] = $p;
         }
         return $out;
+    }
+
+    /**
+     * The monthly recap email's figures for $month (YYYY-MM): income and
+     * spending against the month before, the top 3 spending categories,
+     * monthly budgets that went over (rollover carry included), and net worth
+     * and debt at the month's end against the end of the month before.
+     *
+     * @return array<string, mixed>
+     */
+    public static function monthRecap(int $uid, string $month): array
+    {
+        [$from, $to] = self::monthRange($month);
+        $prevMonth = date('Y-m', (int)strtotime($from . ' 12:00:00 -1 month'));
+        [$pFrom, $pTo] = self::monthRange($prevMonth);
+        $now = self::summary($uid, $from, $to);
+        $before = self::summary($uid, $pFrom, $pTo);
+
+        $budgets = DB::all(
+            "SELECT b.category_id AS categoryId, b.amount_cents AS amountCents, b.rollover, b.rollover_from AS rolloverFrom,
+                    c.name AS name,
+                    COALESCE((SELECT SUM(t.amount_cents) FROM transactions t
+                              WHERE t.user_id = b.user_id AND t.category_id = b.category_id AND t.type = 'expense'
+                                AND t.date >= ? AND t.date <= ?), 0) AS spentCents
+             FROM budgets b
+             JOIN categories c ON c.id = b.category_id
+             WHERE b.user_id = ? AND b.cadence = 'month' AND b.amount_cents > 0
+             ORDER BY LOWER(c.name)",
+            [$from, $to, $uid]
+        );
+        $over = [];
+        foreach ($budgets as $b) {
+            $amount = (int)$b['amountCents'];
+            $carry = (int)$b['rollover'] === 1 && $b['rolloverFrom'] !== null && (string)$b['rolloverFrom'] <= $from
+                ? self::rolloverCarry($uid, (int)$b['categoryId'], 'month', $amount, (string)$b['rolloverFrom'], $from)
+                : 0;
+            if ((int)$b['spentCents'] > $amount + $carry) {
+                $over[] = ['name' => (string)$b['name'], 'spentCents' => (int)$b['spentCents'], 'limitCents' => $amount + $carry];
+            }
+        }
+
+        $points = [];
+        foreach (self::netWorthHistory($uid, 2, $month) as $p) {
+            $points[$p['month']] = $p;
+        }
+        return [
+            'month' => $month,
+            'prevMonth' => $prevMonth,
+            'incomeCents' => (int)$now['incomeCents'],
+            'expenseCents' => (int)$now['expenseCents'],
+            'prevIncomeCents' => (int)$before['incomeCents'],
+            'prevExpenseCents' => (int)$before['expenseCents'],
+            'topCategories' => array_map(
+                static fn(array $r): array => ['name' => $r['name'], 'totalCents' => $r['totalCents']],
+                array_slice(self::breakdown($uid, $from, $to, 'expense'), 0, 3)
+            ),
+            'monthlyBudgets' => count($budgets),
+            'overBudget' => $over,
+            'netWorth' => $points[$month] ?? null,
+            'prevNetWorth' => $points[$prevMonth] ?? null,
+        ];
     }
 
     // ---------- subscriptions ----------

@@ -15,6 +15,11 @@ declare(strict_types=1);
  * a send that fails is retried the next hour. Lives in app/, which the web
  * server refuses to serve.
  *
+ * It also sends the monthly recap (users.recap_emails, opt-in): from 7 AM on
+ * the 1st where the user is (or the first run after), last month's figures
+ * (Repo::monthRecap, RecapEmail), once per month; a month with nothing
+ * recorded is skipped.
+ *
  *   --dry-run    print what would be sent; send, charge and record nothing
  *   --user=ID    only this user
  *   --now=TIME   act as if it's TIME, e.g. 2026-10-29T07:30:00+08:00 (testing)
@@ -34,6 +39,7 @@ require $app . '/lib/auth.php';
 require $app . '/lib/repo.php';
 require $app . '/lib/reminders.php';
 require $app . '/lib/reminder_email.php';
+require $app . '/lib/recap_email.php';
 
 if (!is_file($app . '/config.php')) {
     fwrite(STDERR, "Server not configured (api/app/config.php is missing)\n");
@@ -152,6 +158,82 @@ foreach ($users as $u) {
         }
         fwrite(STDERR, "$tag: failed, will retry next hour: " . $e->getMessage() . "\n");
         error_log('[spendtracker reminders] user ' . $uid . ': ' . $e::class . ': ' . $e->getMessage());
+    }
+}
+
+// ---------- the monthly recap ----------
+$sql = 'SELECT id, email, name, currency, timezone, recap_sent_month, recap_token
+        FROM users WHERE recap_emails = 1 AND email_verified = 1';
+$params = [];
+if ($onlyUser !== null) {
+    $sql .= ' AND id = ?';
+    $params[] = $onlyUser;
+}
+foreach (DB::all($sql . ' ORDER BY id', $params) as $u) {
+    $uid = (int)$u['id'];
+    try {
+        $zone = new DateTimeZone((string)$u['timezone']);
+    } catch (Exception) {
+        $zone = new DateTimeZone(date_default_timezone_get());
+    }
+    $local = $now->setTimezone($zone);
+    $month = $local->modify('first day of last month')->format('Y-m');
+    $tag = "user $uid recap, " . $local->format('D Y-m-d H:i') . ' ' . $zone->getName();
+    $lastSent = $u['recap_sent_month'] === null ? null : (string)$u['recap_sent_month'];
+
+    if ((int)$local->format('G') < ReminderEmail::SEND_HOUR) {
+        echo "$tag: before " . ReminderEmail::SEND_HOUR . " AM, not yet\n";
+        continue;
+    }
+    if ($lastSent !== null && $lastSent >= $month) {
+        echo "$tag: $month already done\n";
+        continue;
+    }
+    // Claim the month first, so two overlapping runs can't both send.
+    if (!$dryRun) {
+        $claimed = DB::exec(
+            'UPDATE users SET recap_sent_month = ? WHERE id = ? AND (recap_sent_month IS NULL OR recap_sent_month < ?)',
+            [$month, $uid, $month]
+        );
+        if ($claimed === 0) {
+            echo "$tag: $month already done\n";
+            continue;
+        }
+    }
+
+    try {
+        if (!$dryRun) {
+            Repo::processDueSubscriptions($uid); // last month's charges belong in it
+        }
+        $recap = Repo::monthRecap($uid, $month);
+        if ($recap['incomeCents'] === 0 && $recap['expenseCents'] === 0) {
+            echo "$tag: nothing recorded in $month, no email\n";
+            continue;
+        }
+        $token = (string)($u['recap_token'] ?? '');
+        if ($token === '') {
+            $token = bin2hex(random_bytes(32));
+            if (!$dryRun) {
+                DB::exec('UPDATE users SET recap_token = ? WHERE id = ?', [$token, $uid]);
+            }
+        }
+        $mail = RecapEmail::monthly($u, $recap, $token);
+        if ($dryRun) {
+            echo "$tag: would send the $month recap\n  Subject: {$mail['subject']}\n\n" . $mail['body'] . "\n\n";
+            continue;
+        }
+        if (!Mailer::send((string)$u['email'], $mail['subject'], $mail['body'], $mail['headers'])) {
+            throw new RuntimeException('the mail server did not accept the email');
+        }
+        echo "$tag: sent the $month recap\n";
+    } catch (Throwable $e) {
+        $failed++;
+        // Hand the month back, so the next hourly run tries again.
+        if (!$dryRun) {
+            DB::exec('UPDATE users SET recap_sent_month = ? WHERE id = ?', [$lastSent, $uid]);
+        }
+        fwrite(STDERR, "$tag: failed, will retry next hour: " . $e->getMessage() . "\n");
+        error_log('[spendtracker recap] user ' . $uid . ': ' . $e::class . ': ' . $e->getMessage());
     }
 }
 

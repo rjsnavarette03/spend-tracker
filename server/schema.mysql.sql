@@ -22,6 +22,12 @@ CREATE TABLE IF NOT EXISTS users (
     timezone VARCHAR(64) NULL,
     reminders_run_on DATE NULL,
     reminder_token CHAR(64) NULL,
+    -- The monthly recap email (opt-in, off by default): recap_sent_month is the
+    -- last month (YYYY-MM) recapped, claimed before sending; recap_token goes
+    -- in its unsubscribe link and, like reminder_token, can only turn it off.
+    recap_emails TINYINT(1) NOT NULL DEFAULT 0,
+    recap_sent_month CHAR(7) NULL,
+    recap_token CHAR(64) NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     UNIQUE KEY uniq_users_email (email),
