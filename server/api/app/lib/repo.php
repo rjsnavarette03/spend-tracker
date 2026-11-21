@@ -622,6 +622,7 @@ final class Repo
     /**
      * Live balance of account `a`:
      *   opening + income tx − expense tx − (outgoing transfers + fees) + incoming transfers
+     *   + adjustments (signed, credit cards only)
      * Positive = money you have; negative = money you owe (credit/loan).
      */
     private const BALANCE_SQL =
@@ -631,7 +632,9 @@ final class Repo
          - COALESCE((SELECT SUM(tro.amount_cents + tro.fee_cents)
                      FROM transfers tro WHERE tro.from_account_id = a.id), 0)
          + COALESCE((SELECT SUM(tri.amount_cents)
-                     FROM transfers tri WHERE tri.to_account_id = a.id), 0)";
+                     FROM transfers tri WHERE tri.to_account_id = a.id), 0)
+         + COALESCE((SELECT SUM(adj.amount_cents)
+                     FROM adjustments adj WHERE adj.account_id = a.id), 0)";
 
     /** @return array<int, array<string, mixed>> */
     public static function listAccounts(int $uid): array
@@ -1047,6 +1050,111 @@ final class Repo
         }
     }
 
+    // ---------- credit card adjustments ----------
+    //
+    // Changes to a card's balance that aren't purchases or payments: points
+    // used to pay, a refund that came back a little different, an
+    // installment conversion fee, a bank correction. amount_cents is signed
+    // like a balance (+ lowers what's owed, − adds to it). They move the
+    // balance and net worth only — never income, spending or budgets — and
+    // don't settle Schedule due dates (they aren't payments).
+
+    private const ADJUSTMENT_SELECT =
+        'SELECT id, account_id AS accountId, amount_cents AS amountCents, reason, date, time, note
+         FROM adjustments';
+
+    /**
+     * @param array<string, mixed> $data
+     * @return array{0: int, 1: int, 2: string, 3: string, 4: ?string, 5: string} account, amount, reason, date, time, note
+     */
+    private static function cleanAdjustmentInput(int $uid, array $data): array
+    {
+        $accountId = Validate::intId($data['accountId'] ?? null);
+        if (self::assertAccountOwned($uid, $accountId) !== 'credit') {
+            throw new ApiError('Adjustments are for credit card accounts', 422);
+        }
+        $amount = Validate::adjustmentCents($data['amountCents'] ?? null);
+        $reason = Validate::adjustmentReason($data['reason'] ?? null);
+        $date = Validate::date($data['date'] ?? null);
+        $time = Validate::timeHmOrNull($data['time'] ?? null);
+        $note = Validate::note($data['note'] ?? '');
+        return [$accountId, $amount, $reason, $date, $time, $note];
+    }
+
+    /**
+     * @param array<string, mixed> $r
+     * @return array<string, mixed>
+     */
+    private static function castAdjustment(array $r): array
+    {
+        return [
+            'id' => (int)$r['id'],
+            'accountId' => (int)$r['accountId'],
+            'amountCents' => (int)$r['amountCents'],
+            'reason' => (string)$r['reason'],
+            'date' => (string)$r['date'],
+            'time' => $r['time'] === null ? null : (string)$r['time'],
+            'note' => (string)$r['note'],
+        ];
+    }
+
+    /** @return array<int, array<string, mixed>> newest first; one card's with $accountId */
+    public static function listAdjustments(int $uid, mixed $accountId): array
+    {
+        $where = ['user_id = ?'];
+        $params = [$uid];
+        if ($accountId !== null && $accountId !== '') {
+            $where[] = 'account_id = ?';
+            $params[] = Validate::intId($accountId);
+        }
+        $rows = DB::all(
+            self::ADJUSTMENT_SELECT . ' WHERE ' . implode(' AND ', $where) . '
+             ORDER BY date DESC, time DESC, id DESC
+             LIMIT 500',
+            $params
+        );
+        return array_map([self::class, 'castAdjustment'], $rows);
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return array<string, mixed>
+     */
+    public static function createAdjustment(int $uid, array $data): array
+    {
+        [$accountId, $amount, $reason, $date, $time, $note] = self::cleanAdjustmentInput($uid, $data);
+        $id = DB::insert(
+            'INSERT INTO adjustments (user_id, account_id, amount_cents, reason, date, time, note)
+             VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [$uid, $accountId, $amount, $reason, $date, $time, $note]
+        );
+        self::restoreOnActivity($uid, $accountId);
+        $row = DB::one(self::ADJUSTMENT_SELECT . ' WHERE id = ? AND user_id = ?', [$id, $uid]);
+        assert($row !== null);
+        return self::castAdjustment($row);
+    }
+
+    /** @param array<string, mixed> $data */
+    public static function updateAdjustment(int $uid, int $id, array $data): void
+    {
+        if (DB::one('SELECT id FROM adjustments WHERE id = ? AND user_id = ?', [$id, $uid]) === null) {
+            throw new ApiError('Adjustment not found', 404);
+        }
+        [$accountId, $amount, $reason, $date, $time, $note] = self::cleanAdjustmentInput($uid, $data);
+        DB::exec(
+            'UPDATE adjustments SET account_id = ?, amount_cents = ?, reason = ?, date = ?, time = ?, note = ?
+             WHERE id = ? AND user_id = ?',
+            [$accountId, $amount, $reason, $date, $time, $note, $id, $uid]
+        );
+    }
+
+    public static function deleteAdjustment(int $uid, int $id): void
+    {
+        if (DB::exec('DELETE FROM adjustments WHERE id = ? AND user_id = ?', [$id, $uid]) === 0) {
+            throw new ApiError('Adjustment not found', 404);
+        }
+    }
+
     // ---------- budgets ----------
 
     /**
@@ -1404,7 +1512,7 @@ final class Repo
             return [];
         }
 
-        // Signed change per account per month, from the three places money moves.
+        // Signed change per account per month, from the four places money moves.
         /** @var array<int, array<string, int>> $deltas */
         $deltas = [];
         $sources = [
@@ -1420,6 +1528,10 @@ final class Repo
                     SUM(amount_cents) AS delta
              FROM transfers WHERE user_id = ? AND to_account_id IS NOT NULL
              GROUP BY to_account_id, SUBSTR(date, 1, 7)',
+            'SELECT account_id AS accountId, SUBSTR(date, 1, 7) AS month,
+                    SUM(amount_cents) AS delta
+             FROM adjustments WHERE user_id = ?
+             GROUP BY account_id, SUBSTR(date, 1, 7)',
         ];
         foreach ($sources as $sql) {
             foreach (DB::all($sql, [$uid]) as $r) {

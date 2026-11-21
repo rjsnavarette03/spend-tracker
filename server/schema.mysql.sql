@@ -299,8 +299,6 @@ CREATE TABLE IF NOT EXISTS reminder_sends (
 -- Bank statement import rules: a statement line whose description contains
 -- `keyword` goes in category_id. They're applied in the browser while an
 -- import is reviewed. keyword is stored lowercase, one rule per keyword.
--- Newest table, so DB::ensureSchema probes it to decide whether to replay
--- the schema.
 CREATE TABLE IF NOT EXISTS import_rules (
     id INT UNSIGNED NOT NULL AUTO_INCREMENT,
     user_id INT UNSIGNED NOT NULL,
@@ -312,4 +310,29 @@ CREATE TABLE IF NOT EXISTS import_rules (
     KEY idx_import_rules_category (category_id),
     CONSTRAINT fk_import_rules_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     CONSTRAINT fk_import_rules_category FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Credit card balance adjustments: points used to pay, a refund that came
+-- back a little different (foreign currency), an installment conversion fee,
+-- a bank correction. They change the card's balance (amount_cents is signed
+-- like a balance: + lowers what's owed, − adds to it) and net worth, and are
+-- NOT income or spending, so reports and budgets never see them. reason is
+-- points | refund | fee | other. They belong to the card, so they go with it.
+-- Newest table, so DB::ensureSchema probes it to decide whether to replay
+-- the schema.
+CREATE TABLE IF NOT EXISTS adjustments (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    user_id INT UNSIGNED NOT NULL,
+    account_id INT UNSIGNED NOT NULL,
+    amount_cents BIGINT NOT NULL,
+    reason VARCHAR(10) NOT NULL,
+    date CHAR(10) NOT NULL,
+    time CHAR(5) NULL,
+    note VARCHAR(500) NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_adjustments_user_date (user_id, date),
+    KEY idx_adjustments_account (account_id),
+    CONSTRAINT fk_adjustments_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_adjustments_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

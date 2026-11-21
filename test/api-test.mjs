@@ -2972,6 +2972,132 @@ if (!REMINDERS_CRON) {
   check('removing the rows restores the history', JSON.stringify(await history(a)) === JSON.stringify(before));
 }
 
+// ---------- credit card adjustments (points, refund difference, fees) ----------
+{
+  const now = new Date();
+  const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const today = `${thisMonth}-${String(now.getDate()).padStart(2, '0')}`;
+  const balance = async (id) => (await a.call('GET', '/accounts')).data.find((x) => x.id === id)?.balanceCents;
+  const report = async () =>
+    JSON.stringify([
+      (await a.call('GET', `/reports/summary?month=${thisMonth}`)).data,
+      (await a.call('GET', `/reports/breakdown?month=${thisMonth}&type=expense`)).data,
+      (await a.call('GET', `/reports/breakdown?month=${thisMonth}&type=income`)).data,
+    ]);
+  const owedNow = async () => {
+    const points = (await a.call('GET', '/reports/networth?months=1')).data;
+    return points[points.length - 1].liabilitiesCents;
+  };
+
+  const card = await a.call('POST', '/accounts', { name: 'Adj Card', type: 'credit', color: '#f87171', openingBalanceCents: 30000 });
+  const bank = await a.call('POST', '/accounts', { name: 'Adj Bank', type: 'debit', color: '#38bdf8', openingBalanceCents: 10000 });
+  const loan = await a.call('POST', '/accounts', { name: 'Adj Loan', type: 'loan', color: '#a78bfa', openingBalanceCents: 10000 });
+  const cardId = card.data.id;
+  const reportBefore = await report();
+  const owedBefore = await owedNow();
+
+  const points = await a.call('POST', '/adjustments', {
+    accountId: cardId, amountCents: 5000, reason: 'points', date: today, time: '09:15', note: 'paid with points',
+  });
+  check('POST /adjustments -> 201 with the row',
+    points.status === 201 && points.data.accountId === cardId && points.data.amountCents === 5000
+      && points.data.reason === 'points' && points.data.date === today && points.data.time === '09:15'
+      && points.data.note === 'paid with points',
+    `${points.status} ${JSON.stringify(points.data)}`);
+  check('points used lower what the card owes', (await balance(cardId)) === -25000, String(await balance(cardId)));
+
+  const fee = await a.call('POST', '/adjustments', { accountId: cardId, amountCents: -1500, reason: 'fee', date: today });
+  check('a fee adds to what the card owes (time and note optional)',
+    fee.status === 201 && fee.data.time === null && fee.data.note === '' && (await balance(cardId)) === -26500,
+    `${fee.status} ${JSON.stringify(fee.data)} ${await balance(cardId)}`);
+
+  check('adjustments are not income or spending: reports unchanged', (await report()) === reportBefore);
+  check('net worth counts them', (await owedNow()) === owedBefore - 3500, `${await owedNow()} vs ${owedBefore}`);
+
+  const list = await a.call('GET', `/adjustments?accountId=${cardId}`);
+  // Newest first; within a day an untimed entry goes last, like transfers.
+  check('GET /adjustments?accountId lists the card\'s, newest first',
+    list.status === 200 && list.data.length === 2 && list.data[0].id === points.data.id && list.data[1].id === fee.data.id,
+    JSON.stringify(list.data));
+  const all = await a.call('GET', '/adjustments');
+  check('GET /adjustments without a filter lists them too',
+    [points.data.id, fee.data.id].every((id) => all.data.some((x) => x.id === id)));
+  check('GET /adjustments?accountId of a debit account -> []',
+    (await a.call('GET', `/adjustments?accountId=${bank.data.id}`)).data.length === 0);
+
+  const rejected = async (label, body, status = 422) => {
+    const r = await a.call('POST', '/adjustments', {
+      accountId: cardId, amountCents: 100, reason: 'other', date: today, ...body,
+    });
+    check(`${label} -> ${status}`, r.status === status, `got ${r.status} ${JSON.stringify(r.data)}`);
+  };
+  await rejected('an adjustment on a debit account', { accountId: bank.data.id });
+  await rejected('an adjustment on a loan', { accountId: loan.data.id });
+  await rejected('a zero amount', { amountCents: 0 });
+  await rejected('a fractional amount', { amountCents: 12.5 });
+  await rejected('an amount as text', { amountCents: '100' });
+  await rejected('an unknown reason', { reason: 'cashback' });
+  await rejected('no reason', { reason: undefined });
+  await rejected('a bad date', { date: '2026-13-01' });
+  check('rejected adjustments changed nothing', (await balance(cardId)) === -26500);
+
+  // Edit: amount, sign, reason, date and note all change.
+  const upd = await a.call('PUT', `/adjustments/${fee.data.id}`, {
+    accountId: cardId, amountCents: 800, reason: 'refund', date: today, time: null, note: 'refund came back higher',
+  });
+  check('PUT /adjustments/:id -> 200, balance follows',
+    upd.status === 200 && (await balance(cardId)) === -24200, `${upd.status} ${await balance(cardId)}`);
+  const edited = (await a.call('GET', `/adjustments?accountId=${cardId}`)).data.find((x) => x.id === fee.data.id);
+  check('the edit is stored', edited?.reason === 'refund' && edited?.amountCents === 800 && edited?.note === 'refund came back higher',
+    JSON.stringify(edited));
+  const moveToBank = await a.call('PUT', `/adjustments/${fee.data.id}`, {
+    accountId: bank.data.id, amountCents: 800, reason: 'refund', date: today,
+  });
+  check('PUT onto a debit account -> 422', moveToBank.status === 422, `got ${moveToBank.status}`);
+  const missing = await a.call('PUT', '/adjustments/99999999', { accountId: cardId, amountCents: 1, reason: 'other', date: today });
+  check('PUT an unknown adjustment -> 404', missing.status === 404, `got ${missing.status}`);
+
+  // Another user can't see, change or delete them, or adjust this card.
+  const bobCard = await b.call('POST', '/accounts', { name: 'Bob Adj Card', type: 'credit', color: '#f87171', openingBalanceCents: 0 });
+  check("another user's list doesn't include them",
+    !(await b.call('GET', '/adjustments')).data.some((x) => x.id === points.data.id)
+      && (await b.call('GET', `/adjustments?accountId=${cardId}`)).data.length === 0);
+  const bobPut = await b.call('PUT', `/adjustments/${points.data.id}`, {
+    accountId: bobCard.data.id, amountCents: 1, reason: 'other', date: today,
+  });
+  const bobDel = await b.call('DELETE', `/adjustments/${points.data.id}`);
+  const bobPost = await b.call('POST', '/adjustments', { accountId: cardId, amountCents: 1, reason: 'other', date: today });
+  check("another user's PUT/DELETE -> 404 and POST onto this card -> 422",
+    bobPut.status === 404 && bobDel.status === 404 && bobPost.status === 422,
+    `${bobPut.status} ${bobDel.status} ${bobPost.status}`);
+  check('the card is untouched', (await balance(cardId)) === -24200);
+  await b.call('DELETE', `/accounts/${bobCard.data.id}`);
+
+  // Delete one: the balance goes back.
+  const del = await a.call('DELETE', `/adjustments/${fee.data.id}`);
+  check('DELETE /adjustments/:id -> 200, balance goes back',
+    del.status === 200 && (await balance(cardId)) === -25000, `${del.status} ${await balance(cardId)}`);
+  check('DELETE it again -> 404', (await a.call('DELETE', `/adjustments/${fee.data.id}`)).status === 404);
+
+  // An adjustment can settle a card (then it can be archived), and a new one
+  // on an archived card brings it back, like any new activity.
+  await a.call('POST', '/adjustments', { accountId: cardId, amountCents: 25000, reason: 'other', date: today });
+  const archived = await a.call('POST', `/accounts/${cardId}/archive`);
+  check('a card settled by an adjustment can be archived', archived.status === 200, `got ${archived.status} ${JSON.stringify(archived.data)}`);
+  await a.call('POST', '/adjustments', { accountId: cardId, amountCents: -300, reason: 'fee', date: today });
+  const afterNew = (await a.call('GET', '/accounts')).data.find((x) => x.id === cardId);
+  check('a new adjustment restores an archived card', afterNew?.archivedAt === null && afterNew?.balanceCents === -300,
+    JSON.stringify(afterNew));
+
+  // Deleting the card deletes its adjustments (they mean nothing without it).
+  await a.call('DELETE', `/accounts/${cardId}`);
+  check("deleting the card deletes its adjustments",
+    !(await a.call('GET', '/adjustments')).data.some((x) => x.id === points.data.id));
+  await a.call('DELETE', `/accounts/${bank.data.id}`);
+  await a.call('DELETE', `/accounts/${loan.data.id}`);
+  check('the report is as it was', (await report()) === reportBefore);
+}
+
 // ---------- logout ----------
 {
   const out = await a.call('POST', '/auth/logout');

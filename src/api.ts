@@ -1,5 +1,6 @@
 import type {
   AccountInput,
+  AdjustmentInput,
   AccountType,
   Api,
   AuthResponse,
@@ -189,6 +190,12 @@ export const api: Api = {
     create: (data: TransferInput) => http('POST', '/transfers', data),
     update: (id: number, data: TransferInput) => http('PUT', `/transfers/${id}`, data),
     remove: (id: number) => http('DELETE', `/transfers/${id}`),
+  },
+  adjustments: {
+    list: (accountId?: number) => http('GET', `/adjustments${qs({ accountId })}`),
+    create: (data: AdjustmentInput) => http('POST', '/adjustments', data),
+    update: (id: number, data: AdjustmentInput) => http('PUT', `/adjustments/${id}`, data),
+    remove: (id: number) => http('DELETE', `/adjustments/${id}`),
   },
   transactions: {
     list: (filter: TxFilter) =>

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import type { Transaction, Transfer } from '../../shared/types';
+import type { Adjustment, Transaction, Transfer } from '../../shared/types';
 import { archivedOnLabel, isArchived } from '../accounts';
 import { api } from '../api';
 import { useAppContext } from '../App';
 import { AccountEditModal } from '../components/AccountEditModal';
+import { AdjustmentModal, adjustmentReasonLabel } from '../components/AdjustmentModal';
 import { BorrowModal } from '../components/BorrowModal';
 import { CreditUsage } from '../components/CreditUsage';
 import { DueTag } from '../components/DueTag';
@@ -19,6 +20,7 @@ import {
   PencilIcon,
   PlusIcon,
   RestoreIcon,
+  SlidersIcon,
   TransferIcon,
   TrashIcon,
 } from '../components/Icons';
@@ -105,17 +107,24 @@ const DETAIL_TRANSFER_SORTS: SortOption<Transfer>[] = [
   },
 ];
 
-// Credit cards get ONE merged ledger (purchases + payments) instead of a
-// separate transfers table — every transfer touching a card IS a payment.
-type Row = { kind: 'tx'; t: Transaction } | { kind: 'transfer'; tr: Transfer };
-const rowDate = (r: Row) => (r.kind === 'tx' ? r.t.date : r.tr.date);
-const rowTime = (r: Row) => (r.kind === 'tx' ? r.t.time ?? '' : r.tr.time ?? '');
-const rowId = (r: Row) => (r.kind === 'tx' ? r.t.id : r.tr.id);
-const rowAmount = (r: Row) => (r.kind === 'tx' ? r.t.amountCents : r.tr.amountCents);
+// Credit cards get ONE merged ledger (purchases + payments + adjustments)
+// instead of a separate transfers table — every transfer touching a card IS a
+// payment.
+type Row =
+  | { kind: 'tx'; t: Transaction }
+  | { kind: 'transfer'; tr: Transfer }
+  | { kind: 'adj'; a: Adjustment };
+const rowEntry = (r: Row) => (r.kind === 'tx' ? r.t : r.kind === 'transfer' ? r.tr : r.a);
+const rowDate = (r: Row) => rowEntry(r).date;
+const rowTime = (r: Row) => rowEntry(r).time ?? '';
+const rowId = (r: Row) => rowEntry(r).id;
+const rowAmount = (r: Row) => Math.abs(rowEntry(r).amountCents);
 const ROW_SEARCH = (r: Row) =>
   r.kind === 'tx'
     ? `${r.t.note} ${r.t.categoryName ?? ''}`
-    : `payment ${r.tr.note} ${r.tr.fromName ?? ''} ${r.tr.toName ?? ''}`;
+    : r.kind === 'transfer'
+      ? `payment ${r.tr.note} ${r.tr.fromName ?? ''} ${r.tr.toName ?? ''}`
+      : `adjustment ${adjustmentReasonLabel(r.a.reason)} ${r.a.note}`;
 const ROW_SORTS: SortOption<Row>[] = [
   {
     value: 'date-desc',
@@ -154,6 +163,7 @@ export function AccountDetail() {
 
   const [txs, setTxs] = useState<Transaction[]>([]);
   const [transfers, setTransfers] = useState<Transfer[]>([]);
+  const [adjustments, setAdjustments] = useState<Adjustment[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
   const [borrowOpen, setBorrowOpen] = useState(false);
@@ -166,6 +176,10 @@ export function AccountDetail() {
     editing: null,
   });
   const [editOpen, setEditOpen] = useState(false);
+  const [adjModal, setAdjModal] = useState<{ open: boolean; editing: Adjustment | null }>({
+    open: false,
+    editing: null,
+  });
 
   const pagedTxs = usePagedTable(txs, DETAIL_TX_SEARCH, DETAIL_TX_SORTS, {
     initialSort: 'date-desc',
@@ -179,8 +193,9 @@ export function AccountDetail() {
     () => [
       ...txs.map((t): Row => ({ kind: 'tx', t })),
       ...transfers.map((tr): Row => ({ kind: 'transfer', tr })),
+      ...adjustments.map((a): Row => ({ kind: 'adj', a })),
     ],
-    [txs, transfers]
+    [txs, transfers, adjustments]
   );
   const pagedRows = usePagedTable(rows, ROW_SEARCH, ROW_SORTS, {
     initialSort: 'date-desc',
@@ -189,11 +204,13 @@ export function AccountDetail() {
   const load = useCallback(async () => {
     if (!id) return;
     try {
-      const [t, allTransfers] = await Promise.all([
+      const [t, allTransfers, adj] = await Promise.all([
         api.transactions.list({ accountId: id }),
         api.transfers.list(),
+        api.adjustments.list(id), // always [] on debit and loan accounts
       ]);
       setTxs(t);
+      setAdjustments(adj);
       setTransfers(
         allTransfers.filter((tr) => tr.fromAccountId === id || tr.toAccountId === id)
       );
@@ -246,6 +263,24 @@ export function AccountDetail() {
     }
   };
 
+  const removeAdjustment = async (a: Adjustment) => {
+    const ok = await confirm({
+      title: 'Delete adjustment',
+      message: `Delete this adjustment of ${fmtMoney(Math.abs(a.amountCents))} (${adjustmentReasonLabel(
+        a.reason
+      )})? The card's balance goes back by that much.`,
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api.adjustments.remove(a.id);
+      afterMutation();
+    } catch (err) {
+      toast.error(cleanError(err));
+    }
+  };
+
   const removeAccount = async () => {
     if (!account) return;
     const usage: string[] = [];
@@ -258,10 +293,15 @@ export function AccountDetail() {
       usage.length > 0 && account.balanceCents === 0 && account.archivedAt === null
         ? ' To keep them linked, archive the account instead.'
         : '';
+    // Adjustments only mean something on their card, so they go with it.
+    const adjNote =
+      adjustments.length > 0
+        ? ` Its ${adjustments.length} adjustment${adjustments.length === 1 ? '' : 's'} will be deleted with it.`
+        : '';
     const message =
-      usage.length > 0
+      (usage.length > 0
         ? `${usage.join(' and ')} will keep their history but lose the link to this account.${archiveHint}`
-        : 'This account will be removed.';
+        : 'This account will be removed.') + adjNote;
     const ok = await confirm({
       title: `Delete "${account.name}"?`,
       message,
@@ -419,6 +459,17 @@ export function AccountDetail() {
               <CoinsIcon size={16} /> Borrow again
             </button>
           )}
+          {/* Points used, a refund that came back different, an installment
+              conversion fee: balance changes that aren't purchases or payments. */}
+          {account.type === 'credit' && (
+            <button
+              className="btn"
+              onClick={() => setAdjModal({ open: true, editing: null })}
+              title="Points used, a refund difference or a fee: change the balance without a purchase or payment"
+            >
+              <SlidersIcon size={16} /> Adjust
+            </button>
+          )}
           {account.type !== 'debit' && (
             <button
               className="btn btn-primary"
@@ -509,7 +560,7 @@ export function AccountDetail() {
           {!loaded ? (
             <div className="empty-state">Loading…</div>
           ) : rows.length === 0 ? (
-            <div className="empty-state">No transactions or payments on this account yet.</div>
+            <div className="empty-state">No transactions, payments or adjustments on this account yet.</div>
           ) : pagedRows.matchedCount === 0 ? (
             <div className="empty-state">Nothing matches your search.</div>
           ) : (
@@ -562,6 +613,47 @@ export function AccountDetail() {
                             className="btn-icon danger"
                             title="Delete"
                             onClick={() => removeTx(t)}
+                          >
+                            <TrashIcon />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  }
+                  if (r.kind === 'adj') {
+                    const a = r.a;
+                    return (
+                      <tr key={`adj-${a.id}`}>
+                        <td style={{ whiteSpace: 'nowrap' }}>
+                          {dateLabel(a.date)}
+                          {a.time && <span className="time-dim"> · {timeLabel(a.time)}</span>}
+                        </td>
+                        <td>
+                          <span className="cat-chip" title="Changes the balance only, not income or spending">
+                            <SlidersIcon size={13} />
+                            <span>Adjustment</span>
+                          </span>
+                        </td>
+                        <td className="note-cell">
+                          {adjustmentReasonLabel(a.reason)}
+                          {a.note ? ` · ${a.note}` : ''}
+                        </td>
+                        <td className={`num ${a.amountCents < 0 ? 'amount-expense' : 'amount-income'}`}>
+                          {a.amountCents < 0 ? '−' : '+'}
+                          {fmtMoney(Math.abs(a.amountCents))}
+                        </td>
+                        <td className="actions">
+                          <button
+                            className="btn-icon"
+                            title="Edit"
+                            onClick={() => setAdjModal({ open: true, editing: a })}
+                          >
+                            <PencilIcon />
+                          </button>
+                          <button
+                            className="btn-icon danger"
+                            title="Delete"
+                            onClick={() => removeAdjustment(a)}
                           >
                             <TrashIcon />
                           </button>
@@ -884,6 +976,14 @@ export function AccountDetail() {
           accounts={accounts}
           defaultFromAccountId={account.id}
           onClose={() => setTransferModal({ open: false, editing: null })}
+          onSaved={afterMutation}
+        />
+      )}
+      {adjModal.open && (
+        <AdjustmentModal
+          account={account}
+          initial={adjModal.editing}
+          onClose={() => setAdjModal({ open: false, editing: null })}
           onSaved={afterMutation}
         />
       )}

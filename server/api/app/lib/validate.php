@@ -374,6 +374,33 @@ final class Validate
     }
 
     /**
+     * A card adjustment: signed like a balance (+ lowers what's owed, − adds
+     * to it), never zero, at most a billion either way.
+     */
+    public static function adjustmentCents(mixed $v): int
+    {
+        if (is_float($v) && floor($v) === $v) {
+            $v = (int)$v;
+        }
+        if (!is_int($v)) {
+            throw new ApiError('Amount must be a whole number of cents', 422);
+        }
+        if ($v === 0 || $v < -100000000000 || $v > 100000000000) {
+            throw new ApiError('Enter an amount for the adjustment', 422);
+        }
+        return $v;
+    }
+
+    /** Why a card balance was adjusted. */
+    public static function adjustmentReason(mixed $r): string
+    {
+        if (!is_string($r) || !in_array($r, ['points', 'refund', 'fee', 'other'], true)) {
+            throw new ApiError('Reason must be points, refund, fee or other', 422);
+        }
+        return $r;
+    }
+
+    /**
      * ISO-4217-style 3-letter currency code, uppercased. We only enforce the
      * format; the frontend restricts the actual choices and falls back to a
      * plain code if a formatter doesn't recognise it.

@@ -218,8 +218,7 @@ CREATE TABLE IF NOT EXISTS reminder_sends (
 
 CREATE INDEX IF NOT EXISTS idx_reminder_sends_sent ON reminder_sends(sent_on);
 
--- Bank statement import rules (see MySQL schema). Newest table:
--- DB::ensureSchema probes it to decide whether to replay the schema.
+-- Bank statement import rules (see MySQL schema).
 CREATE TABLE IF NOT EXISTS import_rules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -230,3 +229,21 @@ CREATE TABLE IF NOT EXISTS import_rules (
 );
 
 CREATE INDEX IF NOT EXISTS idx_import_rules_category ON import_rules(category_id);
+
+-- Credit card balance adjustments (see MySQL schema). Newest table:
+-- DB::ensureSchema probes it to decide whether to replay the schema.
+CREATE TABLE IF NOT EXISTS adjustments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    amount_cents INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    date TEXT NOT NULL,
+    time TEXT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_adjustments_user_date ON adjustments(user_id, date);
+
+CREATE INDEX IF NOT EXISTS idx_adjustments_account ON adjustments(account_id);

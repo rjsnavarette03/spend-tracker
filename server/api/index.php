@@ -351,6 +351,25 @@ try {
         throw new ApiError('Not found', 404);
     }
 
+    // ---------- credit card adjustments ----------
+    if ($resource === 'adjustments') {
+        if ($method === 'GET' && $sub === '') {
+            Http::json(Repo::listAdjustments($uid, $_GET['accountId'] ?? null));
+        }
+        if ($method === 'POST' && $sub === '') {
+            Http::json(Repo::createAdjustment($uid, Http::readJson()), 201);
+        }
+        if ($method === 'PUT' && $sub !== '') {
+            Repo::updateAdjustment($uid, Validate::intId($sub), Http::readJson());
+            Http::json(['ok' => true]);
+        }
+        if ($method === 'DELETE' && $sub !== '') {
+            Repo::deleteAdjustment($uid, Validate::intId($sub));
+            Http::json(['ok' => true]);
+        }
+        throw new ApiError('Not found', 404);
+    }
+
     // ---------- transactions ----------
     if ($resource === 'transactions') {
         // Split receipts (one receipt across categories); before the plain

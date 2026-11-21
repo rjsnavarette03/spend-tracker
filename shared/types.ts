@@ -113,6 +113,34 @@ export interface TransferInput {
   note: string;
 }
 
+// A credit card balance change that isn't a purchase or a payment. It moves
+// the card's balance and net worth only: never income, spending or budgets.
+export type AdjustmentReason =
+  | 'points' // points or rewards used to pay
+  | 'refund' // a refund that came back a little more or less than the charge
+  | 'fee' // e.g. converting a purchase into installments
+  | 'other'; // a correction to match the bank
+
+export interface Adjustment {
+  id: number;
+  accountId: number;
+  // Signed like a balance: + lowers what's owed on the card, − adds to it.
+  amountCents: number;
+  reason: AdjustmentReason;
+  date: string; // YYYY-MM-DD
+  time: string | null; // 'HH:MM' or null
+  note: string;
+}
+
+export interface AdjustmentInput {
+  accountId: number; // a credit card
+  amountCents: number; // non-zero, signed as above
+  reason: AdjustmentReason;
+  date: string;
+  time: string | null;
+  note: string;
+}
+
 export interface Transaction {
   id: number;
   amountCents: number;
@@ -493,6 +521,12 @@ export interface Api {
     list(month?: string): Promise<Transfer[]>;
     create(data: TransferInput): Promise<Transfer>;
     update(id: number, data: TransferInput): Promise<void>;
+    remove(id: number): Promise<void>;
+  };
+  adjustments: {
+    list(accountId?: number): Promise<Adjustment[]>;
+    create(data: AdjustmentInput): Promise<Adjustment>;
+    update(id: number, data: AdjustmentInput): Promise<void>;
     remove(id: number): Promise<void>;
   };
   transactions: {
